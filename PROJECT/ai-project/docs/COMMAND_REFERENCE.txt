@@ -1,0 +1,272 @@
+╔═══════════════════════════════════════════════════════════════════════╗
+║                      COMMAND REFERENCE CARD                           ║
+║                   Keep this handy while developing!                   ║
+╚═══════════════════════════════════════════════════════════════════════╝
+
+
+🚀 START APPLICATION
+════════════════════════════════════════════════════════════════════════
+
+  ONE-CLICK:
+  ──────────
+  Double-click:  start.bat
+
+
+  MANUAL (Terminal 1 - Backend):
+  ───────────────────────────────
+  .\venv\Scripts\activate
+  uvicorn app.main:app --reload
+
+
+  MANUAL (Terminal 2 - Frontend):
+  ────────────────────────────────
+  cd ai-project\frontend
+  npm run dev
+
+
+🛑 STOP APPLICATION
+════════════════════════════════════════════════════════════════════════
+
+  In each terminal:  CTRL + C
+
+
+🔍 VIEW DATABASE
+════════════════════════════════════════════════════════════════════════
+
+  python view_database.py
+
+
+📊 CHECK SERVERS
+════════════════════════════════════════════════════════════════════════
+
+  Backend:   http://localhost:8000
+  API Docs:  http://localhost:8000/docs
+  Frontend:  http://localhost:3000
+
+
+🔧 BACKEND COMMANDS
+════════════════════════════════════════════════════════════════════════
+
+  Activate virtual environment:
+  ────────────────────────────
+  .\venv\Scripts\activate
+
+
+  Install dependencies:
+  ────────────────────
+  pip install -r requirements.txt
+
+
+  Start server:
+  ────────────
+  uvicorn app.main:app --reload
+
+
+  Start on different port:
+  ───────────────────────
+  uvicorn app.main:app --reload --port 8080
+
+
+  View database:
+  ─────────────
+  python view_database.py
+
+
+  Create new migration:
+  ────────────────────
+  python -c "from app.database import Base, engine; Base.metadata.create_all(bind=engine)"
+
+
+  Reset database:
+  ──────────────
+  del app.db
+  (restart server to recreate)
+
+
+🎨 FRONTEND COMMANDS
+════════════════════════════════════════════════════════════════════════
+
+  Navigate to project:
+  ───────────────────
+  cd ai-project\frontend
+
+
+  Install dependencies:
+  ────────────────────
+  npm install
+
+
+  Start dev server:
+  ────────────────
+  npm run dev
+
+
+  Build for production:
+  ────────────────────
+  npm run build
+
+
+  Preview production build:
+  ────────────────────────
+  npm run preview
+
+
+  Lint code:
+  ─────────
+  npm run lint
+
+
+🐛 TROUBLESHOOTING COMMANDS
+════════════════════════════════════════════════════════════════════════
+
+  Kill process on port 8000:
+  ─────────────────────────
+  Stop-Process -Name "python" -Force
+
+
+  Kill process on port 3000:
+  ─────────────────────────
+  Stop-Process -Name "node" -Force
+
+
+  Check what's using port 8000:
+  ────────────────────────────
+  netstat -ano | findstr :8000
+
+
+  Check what's using port 3000:
+  ────────────────────────────
+  netstat -ano | findstr :3000
+
+
+  Clear npm cache:
+  ───────────────
+  npm cache clean --force
+
+
+  Reinstall node_modules:
+  ──────────────────────
+  cd ai-project\frontend
+  rmdir /s node_modules
+  npm install
+
+
+  Recreate virtual environment:
+  ────────────────────────────
+  rmdir /s venv
+  python -m venv venv
+  .\venv\Scripts\activate
+  pip install -r requirements.txt
+
+
+🧪 TESTING COMMANDS
+════════════════════════════════════════════════════════════════════════
+
+  Test backend API:
+  ────────────────
+  Invoke-RestMethod -Uri http://localhost:8000
+
+
+  Test signup:
+  ───────────
+  $body = @{username="test";email="test@test.com";password="pass123"} | ConvertTo-Json
+  Invoke-RestMethod -Uri http://localhost:8000/api/auth/signup -Method POST -Body $body -ContentType "application/json"
+
+
+  Test login:
+  ──────────
+  $body = @{email="test@test.com";password="pass123"} | ConvertTo-Json
+  Invoke-RestMethod -Uri http://localhost:8000/api/auth/login -Method POST -Body $body -ContentType "application/json"
+
+
+  Get all users:
+  ─────────────
+  Invoke-RestMethod -Uri http://localhost:8000/api/admin/users
+
+
+📁 PROJECT STRUCTURE
+════════════════════════════════════════════════════════════════════════
+
+  Backend:  app/
+            ├── main.py       (FastAPI app & routes)
+            ├── auth.py       (JWT authentication)
+            ├── models.py     (Database models)
+            ├── schemas.py    (Pydantic schemas)
+            ├── crud.py       (Database operations)
+            ├── config.py     (Configuration)
+            ├── database.py   (DB connection)
+            └── deps.py       (Dependencies)
+
+  Frontend: ai-project/frontend/
+            ├── src/
+            │   ├── components/
+            │   │   ├── Login.jsx
+            │   │   ├── Signup.jsx
+            │   │   └── ...
+            │   ├── context/
+            │   │   └── AuthContext.jsx
+            │   ├── App.jsx
+            │   └── main.jsx
+            └── package.json
+
+  Database: app.db (SQLite)
+
+
+💾 USEFUL FILE LOCATIONS
+════════════════════════════════════════════════════════════════════════
+
+  Backend config:        app/config.py
+  Frontend config:       ai-project/frontend/vite.config.js
+  Auth logic (backend):  app/auth.py
+  Auth logic (frontend): ai-project/frontend/src/context/AuthContext.jsx
+  Database:              app.db
+  Dependencies:          requirements.txt (backend)
+                         ai-project/frontend/package.json (frontend)
+
+
+📚 DOCUMENTATION FILES
+════════════════════════════════════════════════════════════════════════
+
+  QUICK_START.txt              - Quick reference
+  START_APPLICATION.md         - Detailed startup guide
+  STARTUP_FLOWCHART.txt        - Visual startup process
+  COMMAND_REFERENCE.txt        - This file!
+  FRONTEND_INTEGRATION_COMPLETE.md - Integration details
+  SETUP_COMPLETE.md            - Backend setup details
+  README.md                    - Project overview
+
+
+🌐 IMPORTANT URLS
+════════════════════════════════════════════════════════════════════════
+
+  Frontend:        http://localhost:3000
+  Backend API:     http://localhost:8000
+  API Docs:        http://localhost:8000/docs
+  ReDoc:           http://localhost:8000/redoc
+
+
+🔑 DEFAULT TEST CREDENTIALS (if created)
+════════════════════════════════════════════════════════════════════════
+
+  Check database:  python view_database.py
+
+  Or create new user via:
+  - Signup page: http://localhost:3000/signup
+  - API docs: http://localhost:8000/docs
+
+
+⚡ QUICK TIPS
+════════════════════════════════════════════════════════════════════════
+
+  • Backend auto-reloads when you edit Python files
+  • Frontend auto-refreshes when you edit React files
+  • Database persists across restarts
+  • Token stored in browser localStorage
+  • Check browser console (F12) for frontend errors
+  • Check terminal for backend errors
+
+
+═══════════════════════════════════════════════════════════════════════
+                   🎉 Happy Developing! 🚀
+═══════════════════════════════════════════════════════════════════════
+
