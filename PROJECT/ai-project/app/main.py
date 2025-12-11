@@ -229,6 +229,36 @@ async def remove_inventory(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+# Update inventory item endpoint
+class InventoryUpdate(BaseModel):
+    item_name: str
+    quantity: float
+    unit: str = "units"
+
+@app.put("/api/inventory/update")
+async def update_inventory(
+    item: InventoryUpdate,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Update an existing inventory item"""
+    try:
+        db_helper = DatabaseHelper(db, current_user.id)
+        db_helper.update_item(
+            name=item.item_name,
+            quantity=item.quantity,
+            unit=item.unit
+        )
+        
+        logger.info(f"Updated inventory item: {item.item_name} ({item.quantity} {item.unit})")
+        return {"message": "Item updated successfully", "item": item.item_name}
+    except ValueError as e:
+        logger.error(f"Validation error updating item: {str(e)}")
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error updating inventory item: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error updating item: {str(e)}")
+
 # Keep old endpoint for backward compatibility (optional)
 @app.post("/api/inventory", response_model=schemas.InventoryItemRead, status_code=status.HTTP_201_CREATED)
 def create_inventory_item(
@@ -251,6 +281,44 @@ def delete_inventory_item(
             detail="Item not found or you don't have permission to delete it"
         )
     return None
+
+# Parse ingredient text endpoint
+class ParseIngredientRequest(BaseModel):
+    text: str
+
+class ParseIngredientResponse(BaseModel):
+    quantity: str
+    unit: str
+    item_name: str
+
+@app.post("/api/inventory/parse", response_model=ParseIngredientResponse)
+async def parse_ingredient_text(
+    request: ParseIngredientRequest,
+    current_user: models.User = Depends(get_current_user)
+):
+    """
+    Parse natural language ingredient text using AI
+    Example: "2 kg tomatoes" -> {quantity: "2", unit: "kg", item_name: "tomatoes"}
+    """
+    try:
+        from .llm.llm_client import LLMClient
+        
+        llm_client = LLMClient()
+        parsed = llm_client.parse_ingredient_text(request.text)
+        
+        logger.info(f"Parsed ingredient '{request.text}' -> {parsed}")
+        
+        return ParseIngredientResponse(
+            quantity=parsed["quantity"],
+            unit=parsed["unit"],
+            item_name=parsed["item_name"]
+        )
+    except Exception as e:
+        logger.error(f"Error parsing ingredient: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to parse ingredient: {str(e)}"
+        )
 
 @app.get("/")
 def root():
@@ -279,8 +347,13 @@ async def generate_meal_plan(
                 graph_app = create_shopping_assistant_graph(db_helper)
                 
                 # Create command based on preferences
-                command = request.preferences or "suggest a recipe"
-                if "recipe" not in command.lower() and "meal" not in command.lower():
+                # Ensure command is never None - defensive check
+                command = (request.preferences or "").strip() or "suggest a recipe"
+                command = command or "suggest a recipe"  # Extra safety check
+                # Ensure command is always a string
+                if not isinstance(command, str):
+                    command = str(command) if command else "suggest a recipe"
+                if command and ("recipe" not in command.lower() and "meal" not in command.lower()):
                     command = f"suggest a recipe {command}"
                 
                 # Build comprehensive preferences
@@ -289,7 +362,10 @@ async def generate_meal_plan(
                     full_preferences.append(f"{request.cuisine} cuisine")
                 if request.preferences:
                     full_preferences.append(request.preferences)
-                preferences_str = ". ".join(full_preferences) if full_preferences else request.preferences
+                preferences_str = ". ".join(full_preferences) if full_preferences else (request.preferences or "")
+                
+                # Final safety check - ensure command is a non-empty string
+                command = str(command).strip() if command else "suggest a recipe"
                 
                 initial_state: ShoppingAssistantState = {
                     "command": command,
@@ -300,6 +376,7 @@ async def generate_meal_plan(
                     "preferences": preferences_str,
                     "servings": request.servings,
                     "recipe_name": None,
+                    "inventory_usage": request.inventory_usage or "strict",
                     "inventory": [],
                     "recipe": None,
                     "shopping_list": [],
@@ -344,9 +421,9 @@ async def generate_meal_plan(
             full_preferences.append(f"{request.cuisine} cuisine")
         if request.preferences:
             full_preferences.append(request.preferences)
-        preferences_str = ". ".join(full_preferences) if full_preferences else request.preferences
+        preferences_str = ". ".join(full_preferences) if full_preferences else (request.preferences or "")
         
-        recipe = planner_agent.suggest_recipe(preferences_str, request.servings)
+        recipe = planner_agent.suggest_recipe(preferences_str, request.servings, request.inventory_usage or "strict")
         
         logger.info(f"Meal plan generated via direct agent: {recipe.get('name', 'Unknown')}")
         return {
