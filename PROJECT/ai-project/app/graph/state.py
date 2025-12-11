@@ -21,6 +21,7 @@ class ShoppingAssistantState(TypedDict):
     preferences: Optional[str]
     servings: Optional[int]
     recipe_name: Optional[str]
+    inventory_usage: Optional[str]  # 'strict' or 'main' - controls how inventory is used in recipes
     
     # Agent outputs
     inventory: Annotated[List[Dict], "Current inventory items"]

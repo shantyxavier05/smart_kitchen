@@ -27,12 +27,16 @@ class InventoryAgent:
         Returns:
             Dictionary with item details
         """
+        if not item_name:
+            logger.error("Cannot add item: item_name is None or empty")
+            return {"error": "Item name cannot be empty"}
+        
         try:
             from app.utils.unit_converter import UnitConverter
             unit_converter = UnitConverter()
             
             # Normalize item name (lowercase, trimmed)
-            item_name_normalized = item_name.lower().strip()
+            item_name_normalized = item_name.lower().strip() if item_name else ""
             
             # Find existing item (case-insensitive, fuzzy)
             existing = self.db_helper.find_item_fuzzy(item_name_normalized)
@@ -100,9 +104,13 @@ class InventoryAgent:
         Returns:
             Dictionary with remaining item details or None if removed
         """
+        if not item_name:
+            logger.error("Cannot remove item: item_name is None or empty")
+            return {"error": "Item name cannot be empty"}
+        
         try:
             # Normalize item name
-            item_name_normalized = item_name.lower().strip()
+            item_name_normalized = item_name.lower().strip() if item_name else ""
             existing = self.db_helper.find_item_fuzzy(item_name_normalized)
             
             if not existing:
@@ -153,12 +161,16 @@ class InventoryAgent:
         Returns:
             Dictionary with remaining item details
         """
+        if not item_name:
+            logger.error("Cannot remove item: item_name is None or empty")
+            return {"error": "Item name cannot be empty"}
+        
         try:
             from app.utils.unit_converter import UnitConverter
             unit_converter = UnitConverter()
             
             # Normalize item name
-            item_name_normalized = item_name.lower().strip()
+            item_name_normalized = item_name.lower().strip() if item_name else ""
             
             # Find existing item
             existing = self.db_helper.find_item_fuzzy(item_name_normalized)
@@ -178,7 +190,7 @@ class InventoryAgent:
             
             # Convert removal quantity to existing unit if units are different
             removal_quantity = quantity
-            if unit and unit.lower() != existing_unit.lower():
+            if unit and existing_unit and unit.lower() != existing_unit.lower():
                 converted_qty = unit_converter.convert_to_unit(quantity, unit, existing_unit)
                 if converted_qty is not None:
                     removal_quantity = converted_qty

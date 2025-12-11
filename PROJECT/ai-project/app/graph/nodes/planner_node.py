@@ -24,6 +24,7 @@ def planner_node(state: ShoppingAssistantState, db_helper: DatabaseHelper) -> Sh
     """
     preferences = state.get("preferences")
     servings = state.get("servings", 4)
+    inventory_usage = state.get("inventory_usage", "strict")
     
     updated_state = state.copy()
     planner_agent = PlannerAgent(db_helper)
@@ -49,7 +50,9 @@ def planner_node(state: ShoppingAssistantState, db_helper: DatabaseHelper) -> Sh
             return updated_state
         
         # Suggest recipe using PlannerAgent
-        recipe = planner_agent.suggest_recipe(preferences, servings)
+        # Ensure preferences is a string (not None)
+        preferences_str = preferences if preferences else ""
+        recipe = planner_agent.suggest_recipe(preferences_str, servings, inventory_usage)
         
         # Update recipe cache
         recipe_cache[recipe.get("name", "Unknown Recipe")] = recipe

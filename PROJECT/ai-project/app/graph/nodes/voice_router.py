@@ -21,10 +21,25 @@ def voice_router_node(state: ShoppingAssistantState) -> ShoppingAssistantState:
     Returns:
         Updated state with parsed command information
     """
-    command = state.get("command", "").lower()
+    # Handle None case - if command is None, use empty string
+    try:
+        raw_command = state.get("command")
+        if raw_command is None:
+            logger.warning("Command is None in state, using default")
+            command = ""
+        elif not isinstance(raw_command, str):
+            logger.warning(f"Command is not a string: {type(raw_command)}, converting to string")
+            command = str(raw_command) if raw_command else ""
+        else:
+            command = raw_command
+        command = (command or "").lower()
+    except Exception as e:
+        logger.error(f"Error processing command: {e}, state keys: {list(state.keys()) if isinstance(state, dict) else 'N/A'}")
+        command = ""
+    
     tokens = _tokenize(command)
     
-    logger.info(f"Voice router processing: {tokens}")
+    logger.info(f"Voice router processing command: '{command}', tokens: {tokens}")
     
     # Initialize state fields
     updated_state = state.copy()
@@ -39,38 +54,49 @@ def voice_router_node(state: ShoppingAssistantState) -> ShoppingAssistantState:
     ADD_SYNONYMS = {'add', 'insert', 'include', 'put', 'place', 'store', 'keep', 'save', 'enter', 'register'}
     REMOVE_SYNONYMS = {'remove', 'delete', 'take', 'exclude', 'eliminate', 'drop', 'discard', 'withdraw'}
     UPDATE_SYNONYMS = {'update', 'change', 'modify', 'set', 'adjust', 'alter', 'edit', 'revise'}
-    RECIPE_SYNONYMS = {'suggest', 'recommend', 'recipe', 'cook', 'make', 'prepare', 'dish', 'meal', 'food'}
+    RECIPE_SYNONYMS = {'suggest', 'recommend', 'recipe', 'cook', 'make', 'prepare', 'dish', 'meal', 'food', 'create', 'generate', 'plan', 'biryani', 'curry'}
     SHOPPING_SYNONYMS = {'shopping', 'buy', 'purchase', 'need', 'list', 'grocery', 'shop', 'market'}
     INVENTORY_SYNONYMS = {'inventory', 'ingredients', 'stock', 'items', 'have', 'what', 'show', 'list', 'display'}
     
     # Determine command type
+    # Check RECIPE_SYNONYMS first since "create" and meal-related commands should have priority
     action_type = None
     action_idx = -1
     
+    # First pass: Check for recipe/shopping/inventory keywords (higher priority)
     for i, token in enumerate(tokens):
-        if _find_synonym_match(token, ADD_SYNONYMS):
-            action_type = 'add'
-            action_idx = i
-            break
-        elif _find_synonym_match(token, REMOVE_SYNONYMS):
-            action_type = 'remove'
-            action_idx = i
-            break
-        elif _find_synonym_match(token, UPDATE_SYNONYMS):
-            action_type = 'update'
-            action_idx = i
-            break
-        elif _find_synonym_match(token, RECIPE_SYNONYMS):
+        if _find_synonym_match(token, RECIPE_SYNONYMS):
             action_type = 'recipe'
+            action_idx = i
             break
         elif _find_synonym_match(token, SHOPPING_SYNONYMS):
             action_type = 'shopping'
+            action_idx = i
             break
         elif _find_synonym_match(token, INVENTORY_SYNONYMS):
             action_type = 'inventory'
+            action_idx = i
             break
     
+    # Second pass: Only check for add/remove/update if no recipe/shopping/inventory match found
+    if action_type is None:
+        for i, token in enumerate(tokens):
+            if _find_synonym_match(token, ADD_SYNONYMS):
+                action_type = 'add'
+                action_idx = i
+                break
+            elif _find_synonym_match(token, REMOVE_SYNONYMS):
+                action_type = 'remove'
+                action_idx = i
+                break
+            elif _find_synonym_match(token, UPDATE_SYNONYMS):
+                action_type = 'update'
+                action_idx = i
+                break
+    
     updated_state["command_type"] = action_type
+    
+    logger.info(f"Determined action_type: {action_type}, action_idx: {action_idx}")
     
     # Extract parameters for inventory operations
     if action_type in ['add', 'remove', 'update']:
@@ -80,22 +106,30 @@ def voice_router_node(state: ShoppingAssistantState) -> ShoppingAssistantState:
         updated_state["item_name"] = item_name
         updated_state["quantity"] = quantity
         updated_state["unit"] = unit
+        
+        logger.info(f"Extracted for {action_type}: item_name={item_name}, quantity={quantity}, unit={unit}")
     
     if not action_type:
+        logger.warning(f"No action type found for command: '{command}', tokens: {tokens}")
         updated_state["error"] = "I didn't understand that command."
         updated_state["success"] = False
     
+    logger.info(f"Voice router returning: command_type={action_type}, success={updated_state.get('success')}")
     return updated_state
 
 
 def _tokenize(text: str) -> list:
     """Tokenize text into words"""
+    if not text:
+        return []
     text = re.sub(r'[^\w\s]', ' ', text.lower())
     return text.split()
 
 
 def _find_synonym_match(word: str, synonym_set: set) -> bool:
     """Check if word matches any synonym"""
+    if not word:
+        return False
     word_lower = word.lower()
     if word_lower in synonym_set:
         return True

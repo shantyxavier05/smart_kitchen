@@ -66,9 +66,12 @@ class DatabaseHelper:
         if self.user_id is None:
             raise ValueError("User ID must be set. Call set_user() first or pass user_id in constructor.")
         
+        if not name:
+            raise ValueError("Item name cannot be empty")
+        
         try:
             # Normalize name
-            name_normalized = name.lower().strip()
+            name_normalized = name.lower().strip() if name else ""
             
             # Check if item exists for this user
             existing = self.db.query(Inventory).filter(
@@ -113,6 +116,9 @@ class DatabaseHelper:
         if self.user_id is None:
             return None
         
+        if not name:
+            return None
+        
         try:
             item = self.db.query(Inventory).filter(
                 Inventory.user_id == self.user_id,
@@ -139,8 +145,11 @@ class DatabaseHelper:
         if self.user_id is None:
             return None
         
+        if not name:
+            return None
+        
         try:
-            name_normalized = name.lower().strip()
+            name_normalized = name.lower().strip() if name else ""
             
             # Try exact match first (case-insensitive)
             item = self.db.query(Inventory).filter(
@@ -211,6 +220,9 @@ class DatabaseHelper:
         if self.user_id is None:
             raise ValueError("User ID must be set")
         
+        if not name:
+            raise ValueError("Item name cannot be empty")
+        
         try:
             item = self.db.query(Inventory).filter(
                 Inventory.user_id == self.user_id,
@@ -235,6 +247,9 @@ class DatabaseHelper:
         """Reduce quantity of an item"""
         if self.user_id is None:
             raise ValueError("User ID must be set")
+        
+        if not name:
+            raise ValueError("Item name cannot be empty")
         
         try:
             item = self.db.query(Inventory).filter(
@@ -269,6 +284,9 @@ class DatabaseHelper:
         """Delete an item from inventory"""
         if self.user_id is None:
             raise ValueError("User ID must be set")
+        
+        if not name:
+            raise ValueError("Item name cannot be empty")
         
         try:
             item = self.db.query(Inventory).filter(

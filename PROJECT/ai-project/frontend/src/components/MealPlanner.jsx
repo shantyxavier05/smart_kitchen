@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import UserMenu from './UserMenu'
 
 function MealPlanner() {
@@ -11,6 +11,9 @@ function MealPlanner() {
   const [cuisine, setCuisine] = useState('')
   const [servings, setServings] = useState(4)
   const [dietaryPreferences, setDietaryPreferences] = useState('')
+  const [isListening, setIsListening] = useState(false)
+  const [voiceError, setVoiceError] = useState(null)
+  const recognitionRef = useRef(null)
 
   const handleGenerate = async () => {
     setLoading(true)
@@ -67,10 +70,114 @@ function MealPlanner() {
     }
   }
 
+  // Initialize Web Speech API
+  useEffect(() => {
+    // Check if browser supports Web Speech API
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
+    
+    if (!SpeechRecognition) {
+      console.warn('Web Speech API not supported in this browser')
+      return
+    }
+
+    // Create recognition instance
+    const recognition = new SpeechRecognition()
+    recognition.continuous = false
+    recognition.interimResults = true
+    recognition.lang = 'en-US'
+
+    // Handle results
+    recognition.onresult = (event) => {
+      let finalTranscript = ''
+
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const transcript = event.results[i][0].transcript
+        if (event.results[i].isFinal) {
+          finalTranscript += transcript + ' '
+        }
+      }
+
+      // Update search query with final transcript only (cleaner results)
+      if (finalTranscript) {
+        setSearchQuery(prev => {
+          const combined = (prev + ' ' + finalTranscript).trim()
+          return combined
+        })
+      }
+    }
+
+    // Handle errors
+    recognition.onerror = (event) => {
+      console.error('Speech recognition error:', event.error)
+      setIsListening(false)
+      
+      let errorMessage = 'Voice input error. Please try again.'
+      switch (event.error) {
+        case 'no-speech':
+          errorMessage = 'No speech detected. Please try again.'
+          break
+        case 'audio-capture':
+          errorMessage = 'Microphone not found. Please check your device.'
+          break
+        case 'not-allowed':
+          errorMessage = 'Microphone access denied. Please enable microphone permissions.'
+          break
+        case 'network':
+          errorMessage = 'Network error. Please check your connection.'
+          break
+        default:
+          errorMessage = `Voice input error: ${event.error}`
+      }
+      
+      setVoiceError(errorMessage)
+      setTimeout(() => setVoiceError(null), 5000)
+    }
+
+    // Handle end of recognition
+    recognition.onend = () => {
+      setIsListening(false)
+    }
+
+    // Handle start
+    recognition.onstart = () => {
+      setIsListening(true)
+      setVoiceError(null)
+    }
+
+    recognitionRef.current = recognition
+
+    return () => {
+      if (recognitionRef.current) {
+        recognitionRef.current.abort()
+      }
+    }
+  }, [])
+
   const handleVoiceInput = () => {
-    // Placeholder for voice input
-    console.log('Voice input activated')
-    // TODO: Add voice recognition
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
+    
+    if (!SpeechRecognition) {
+      setVoiceError('Voice input is not supported in your browser. Please use Chrome, Edge, or Safari.')
+      setTimeout(() => setVoiceError(null), 5000)
+      return
+    }
+
+    try {
+      if (isListening) {
+        // Stop listening
+        recognitionRef.current?.stop()
+        setIsListening(false)
+      } else {
+        // Start listening
+        setVoiceError(null)
+        recognitionRef.current?.start()
+      }
+    } catch (err) {
+      console.error('Error starting voice recognition:', err)
+      setVoiceError('Failed to start voice input. Please try again.')
+      setTimeout(() => setVoiceError(null), 5000)
+      setIsListening(false)
+    }
   }
 
   return (
@@ -155,7 +262,10 @@ function MealPlanner() {
           <div className="meal-planner-header">
             <h1 className="meal-planner-title">Generate Your Weekly Meal Plan</h1>
             <p className="meal-planner-subtitle">
-              Tell us what you're in the mood for, and we'll create a delicious plan based on your kitchen's inventory.
+              Tell us what you're in the mood for, and we'll create a delicious plan based on your kitchen's inventory. 
+              <span style={{ display: 'inline-block', marginTop: '8px', padding: '4px 12px', backgroundColor: '#f0fdf4', color: '#166534', borderRadius: '6px', fontSize: '0.9rem', fontWeight: '500' }}>
+                🎤 Click the microphone to use voice input
+              </span>
             </p>
           </div>
 
@@ -170,18 +280,76 @@ function MealPlanner() {
                 <input
                   type="text"
                   className="search-input"
-                  placeholder="e.g., 'a week of healthy vegetarian meals' or 'something with chicken and broccoli'"
+                  placeholder={isListening ? "Listening... Speak now!" : "e.g., 'a week of healthy vegetarian meals' or 'something with chicken and broccoli'"}
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
+                  style={isListening ? { borderColor: '#16a34a', boxShadow: '0 0 0 3px rgba(22, 163, 74, 0.2)' } : {}}
                 />
-                <button className="voice-input-btn" onClick={handleVoiceInput}>
+                <button 
+                  className={`voice-input-btn ${isListening ? 'listening' : ''}`}
+                  onClick={handleVoiceInput}
+                  title={isListening ? "Stop recording" : "Start voice input"}
+                  style={isListening ? {
+                    background: '#16a34a',
+                    animation: 'pulse 1.5s ease-in-out infinite'
+                  } : {}}
+                >
                   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/>
-                    <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
-                    <line x1="12" y1="19" x2="12" y2="22"/>
+                    {isListening ? (
+                      <>
+                        <rect x="6" y="6" width="12" height="12" rx="2"/>
+                      </>
+                    ) : (
+                      <>
+                        <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/>
+                        <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+                        <line x1="12" y1="19" x2="12" y2="22"/>
+                      </>
+                    )}
                   </svg>
                 </button>
               </div>
+              {/* Voice Error/Status Message */}
+              {isListening && (
+                <div style={{
+                  marginTop: '12px',
+                  padding: '12px 16px',
+                  backgroundColor: '#f0fdf4',
+                  border: '1px solid #86efac',
+                  borderRadius: '8px',
+                  color: '#166534',
+                  fontSize: '0.9rem',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px'
+                }}>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ animation: 'pulse 1.5s ease-in-out infinite' }}>
+                    <circle cx="12" cy="12" r="10"/>
+                  </svg>
+                  Listening... Speak clearly into your microphone
+                </div>
+              )}
+              {voiceError && (
+                <div style={{
+                  marginTop: '12px',
+                  padding: '12px 16px',
+                  backgroundColor: '#fef2f2',
+                  border: '1px solid #fecaca',
+                  borderRadius: '8px',
+                  color: '#991b1b',
+                  fontSize: '0.9rem',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px'
+                }}>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <circle cx="12" cy="12" r="10"/>
+                    <line x1="12" y1="8" x2="12" y2="12"/>
+                    <line x1="12" y1="16" x2="12.01" y2="16"/>
+                  </svg>
+                  {voiceError}
+                </div>
+              )}
             </div>
 
             <div className="controls-row" style={{ flexWrap: 'wrap', gap: '20px' }}>
@@ -315,14 +483,30 @@ function MealPlanner() {
           {/* Error Message */}
           {error && (
             <div style={{
-              padding: '16px',
-              marginBottom: '16px',
-              backgroundColor: '#fee',
-              color: '#c33',
-              borderRadius: '8px',
-              border: '1px solid #fcc'
+              padding: '20px 24px',
+              marginBottom: '24px',
+              backgroundColor: '#fee2e2',
+              color: '#991b1b',
+              borderRadius: '12px',
+              border: '1px solid #fecaca',
+              display: 'flex',
+              gap: '12px',
+              alignItems: 'flex-start'
             }}>
-              {error}
+              <svg style={{ flexShrink: 0, marginTop: '2px' }} width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <circle cx="12" cy="12" r="10"/>
+                <line x1="12" y1="8" x2="12" y2="12"/>
+                <line x1="12" y1="16" x2="12.01" y2="16"/>
+              </svg>
+              <div style={{ flex: 1 }}>
+                <strong style={{ display: 'block', marginBottom: '8px', fontSize: '1rem' }}>Error Generating Meal Plan</strong>
+                <p style={{ margin: 0, lineHeight: '1.6' }}>{error}</p>
+                {error.includes('inventory') && (
+                  <p style={{ margin: '12px 0 0 0', fontSize: '0.9rem', opacity: 0.9 }}>
+                    💡 Tip: Make sure you have items in your <a href="#inventory" style={{ color: '#dc2626', fontWeight: 600, textDecoration: 'underline' }}>inventory</a> before generating a meal plan.
+                  </p>
+                )}
+              </div>
             </div>
           )}
 
@@ -440,9 +624,21 @@ function MealPlanner() {
 
                 {(!mealPlan.ingredients || mealPlan.ingredients.length === 0) && 
                  (!mealPlan.instructions || mealPlan.instructions.length === 0) && (
-                  <p style={{ color: '#6b7280', fontStyle: 'italic' }}>
-                    No detailed recipe information available. Please add items to your inventory for better meal suggestions.
-                  </p>
+                  <div style={{ 
+                    padding: '24px',
+                    backgroundColor: '#f0fdf4',
+                    border: '1px solid #bbf7d0',
+                    borderRadius: '8px',
+                    marginTop: '24px'
+                  }}>
+                    <p style={{ color: '#166534', fontWeight: 500, margin: '0 0 8px 0' }}>
+                      📝 No detailed recipe information available
+                    </p>
+                    <p style={{ color: '#15803d', margin: 0, lineHeight: '1.6' }}>
+                      To get AI-powered recipes with detailed ingredients and instructions, make sure you have items in your inventory.
+                      Visit the <a href="#inventory" style={{ color: '#16a34a', fontWeight: 600, textDecoration: 'underline' }}>Inventory page</a> to add ingredients.
+                    </p>
+                  </div>
                 )}
               </div>
             )}
