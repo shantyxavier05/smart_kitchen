@@ -196,7 +196,11 @@ async def remove_inventory(
     db: Session = Depends(get_db)
 ):
     """Remove inventory item using LangGraph"""
+    import logging
+    logger = logging.getLogger(__name__)
+    
     try:
+        logger.info(f"Remove inventory request: item_name='{item.item_name}', quantity={item.quantity}")
         db_helper = DatabaseHelper(db, current_user.id)
         
         if LANGGRAPH_AVAILABLE:
@@ -220,20 +224,33 @@ async def remove_inventory(
                 "error": None,
                 "success": False,
                 "recipe_cache": {},
-                "thresholds": {}
+                "thresholds": {},
+                "inventory_usage": None
             }
             
+            logger.info(f"Invoking LangGraph for removal...")
             result = graph_app.invoke(initial_state)
+            logger.info(f"LangGraph result: success={result.get('success')}, error={result.get('error')}")
+            
+            if result.get("error"):
+                raise HTTPException(status_code=400, detail=result.get("error"))
+            
             return {"message": "Item removed successfully", "item": result.get("response_data")}
         else:
             # Fallback to direct database helper
+            logger.info(f"Using direct database helper (LangGraph not available)")
             if item.quantity is None:
+                logger.info(f"Deleting item completely: {item.item_name}")
                 db_helper.delete_item(item.item_name)
             else:
+                logger.info(f"Reducing quantity: {item.item_name} by {item.quantity}")
                 db_helper.reduce_quantity(item.item_name, item.quantity)
             return {"message": "Item removed successfully"}
         
+    except HTTPException:
+        raise
     except Exception as e:
+        logger.error(f"Error removing inventory item: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 # Update inventory item endpoint
@@ -347,40 +364,56 @@ async def generate_meal_plan(
     
     try:
         logger.info(f"Generating meal plan for user {current_user.id}: preferences={request.preferences}, servings={request.servings}")
+        
+        # Safety check: Filter harmful or unethical recipe requests
+        from app.utils.content_filter import check_recipe_request_safety
+        
+        if request.preferences:
+            is_safe, error_message = check_recipe_request_safety(request.preferences)
+            if not is_safe:
+                logger.warning(f"🚫 BLOCKED harmful recipe request from user {current_user.id}: {request.preferences}")
+                raise HTTPException(
+                    status_code=400, 
+                    detail="We cannot generate this type of content. Please try a different recipe request."
+                )
+        
+        if request.cuisine:
+            is_safe, error_message = check_recipe_request_safety(request.cuisine)
+            if not is_safe:
+                logger.warning(f"🚫 BLOCKED harmful cuisine request from user {current_user.id}: {request.cuisine}")
+                raise HTTPException(
+                    status_code=400,
+                    detail="We cannot generate this type of content. Please try a different recipe request."
+                )
+        
         db_helper = DatabaseHelper(db, current_user.id)
         
         if LANGGRAPH_AVAILABLE:
             try:
                 graph_app = create_shopping_assistant_graph(db_helper)
                 
-                # Create command based on preferences
-                # Ensure command is never None - defensive check
-                command = (request.preferences or "").strip() or "suggest a recipe"
-                command = command or "suggest a recipe"  # Extra safety check
-                # Ensure command is always a string
-                if not isinstance(command, str):
-                    command = str(command) if command else "suggest a recipe"
-                if command and ("recipe" not in command.lower() and "meal" not in command.lower()):
-                    command = f"suggest a recipe {command}"
+                # Build preferences string - keep user's exact request
+                # DO NOT modify or wrap the user's preferences
+                preferences_str = request.preferences or ""
                 
-                # Build comprehensive preferences
-                full_preferences = []
-                if request.cuisine:
-                    full_preferences.append(f"{request.cuisine} cuisine")
-                if request.preferences:
-                    full_preferences.append(request.preferences)
-                preferences_str = ". ".join(full_preferences) if full_preferences else (request.preferences or "")
+                # If user specified a cuisine, only add it if there are no preferences yet
+                # Otherwise, the user's specific dish request takes priority
+                if request.cuisine and not preferences_str:
+                    preferences_str = f"{request.cuisine} cuisine"
                 
-                # Final safety check - ensure command is a non-empty string
-                command = str(command).strip() if command else "suggest a recipe"
+                # Ensure preferences is a string
+                preferences_str = str(preferences_str).strip() if preferences_str else ""
+                
+                # For the command field, use a simple "suggest a recipe" since command_type is already set
+                command = "suggest a recipe"
                 
                 initial_state: ShoppingAssistantState = {
                     "command": command,
-                    "command_type": "recipe",
+                    "command_type": "recipe",  # Directly set to recipe to bypass voice router
                     "item_name": None,
                     "quantity": None,
                     "unit": None,
-                    "preferences": preferences_str,
+                    "preferences": preferences_str,  # User's exact dish request
                     "servings": request.servings,
                     "recipe_name": None,
                     "inventory_usage": request.inventory_usage or "strict",
@@ -422,13 +455,12 @@ async def generate_meal_plan(
         from .agents.planner_agent import PlannerAgent
         planner_agent = PlannerAgent(db_helper)
         
-        # Build comprehensive preferences
-        full_preferences = []
-        if request.cuisine:
-            full_preferences.append(f"{request.cuisine} cuisine")
-        if request.preferences:
-            full_preferences.append(request.preferences)
-        preferences_str = ". ".join(full_preferences) if full_preferences else (request.preferences or "")
+        # Use user's exact preferences - don't modify their specific dish request
+        preferences_str = request.preferences or ""
+        
+        # Only add cuisine if user hasn't specified a dish
+        if request.cuisine and not preferences_str:
+            preferences_str = f"{request.cuisine} cuisine"
         
         recipe = planner_agent.suggest_recipe(preferences_str, request.servings, request.inventory_usage or "strict")
         

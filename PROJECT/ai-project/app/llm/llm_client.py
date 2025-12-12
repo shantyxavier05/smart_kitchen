@@ -67,10 +67,10 @@ class LLMClient:
             response = client.chat.completions.create(
                 model="gpt-4o-mini",  # Using GPT-4o-mini for better quality and lower cost
                 messages=[
-                    {"role": "system", "content": "You are a helpful cooking assistant. Always respond with valid JSON in this exact format: {\"name\": \"Recipe Name\", \"description\": \"Recipe description\", \"servings\": 4, \"ingredients\": [{\"name\": \"ingredient\", \"quantity\": 1, \"unit\": \"unit\"}], \"instructions\": [\"step 1\", \"step 2\"]}"},
+                    {"role": "system", "content": "You are a professional chef creating AUTHENTIC, TRADITIONAL, and ETHICAL recipes. 🚫 SAFETY RULES - ABSOLUTE PROHIBITIONS: NEVER create recipes with: human meat/flesh/body parts, pets (dogs, cats), endangered animals, toxic/poisonous substances, inedible items (plastic, metal, dirt), illegal drugs, or any harmful/dangerous ingredients. ONLY create recipes with legitimate, edible, ethical food ingredients. If a request violates these rules, refuse it. ✅ RECIPE RULES: 1) When user requests a specific dish (e.g., 'tea', 'paneer butter masala'), create that EXACT dish with ONLY authentic ingredients. 2) NEVER add random ingredients that don't belong - if they ask for tea, use only tea ingredients (tea, water, milk, sugar, authentic tea spices like ginger/cardamom). DO NOT add butter, chilly powder, garam masala, or vegetables to tea! 3) Authenticity is MORE important than using inventory items. 4) If inventory has wrong ingredients for the requested dish, ignore them - don't force them in. Always respond with valid JSON: {\"name\": \"Recipe Name\", \"description\": \"Recipe description\", \"servings\": 4, \"ingredients\": [{\"name\": \"ingredient\", \"quantity\": 1, \"unit\": \"unit\"}], \"instructions\": [\"step 1\", \"step 2\"]}"},
                     {"role": "user", "content": prompt}
                 ],
-                temperature=0.7,
+                temperature=0.2,
                 max_tokens=2000,
                 response_format={"type": "json_object"}
             )
@@ -81,6 +81,7 @@ class LLMClient:
             try:
                 recipe = json.loads(content)
                 logger.info(f"Successfully generated recipe: {recipe.get('name', 'Unknown')}")
+                logger.info(f"Recipe details - Name: '{recipe.get('name')}', Ingredients count: {len(recipe.get('ingredients', []))}")
                 return recipe
             except json.JSONDecodeError as e:
                 logger.error(f"Failed to parse JSON from LLM response: {e}")

@@ -34,10 +34,18 @@ function MealPlanner() {
       console.log('Generating meal plan with:', { searchQuery, inventoryUsage })
       
       // Build preferences string
+      // Priority: If user typed a specific dish (searchQuery), use that as the main preference
+      // Otherwise, combine cuisine and dietary preferences
       let preferences = ''
-      if (cuisine) preferences += `${cuisine} cuisine. `
-      if (dietaryPreferences) preferences += `${dietaryPreferences}. `
-      if (searchQuery) preferences += searchQuery
+      
+      if (searchQuery) {
+        // User specified a dish - use it as-is (highest priority)
+        preferences = searchQuery.trim()
+      } else {
+        // No specific dish - combine other preferences
+        if (dietaryPreferences) preferences += `${dietaryPreferences}. `
+        // Don't add cuisine to preferences here - it's sent separately
+      }
       
       const response = await fetch('http://localhost:8000/api/meal-plan/generate', {
         method: 'POST',
@@ -46,7 +54,7 @@ function MealPlanner() {
           'Authorization': `Bearer ${token}`
         },
         body: JSON.stringify({
-          preferences: preferences.trim() || null,
+          preferences: preferences || null,
           servings: servings || 4,
           cuisine: cuisine || null,
           inventory_usage: inventoryUsage
@@ -759,19 +767,19 @@ function MealPlanner() {
                       onClick={handleConfirmMeal}
                       disabled={confirming}
                       style={{
-                        padding: '12px 20px',
+                        padding: '8px 16px',
                         backgroundColor: '#16a34a',
                         color: 'white',
                         border: 'none',
-                        borderRadius: '8px',
-                        fontSize: '0.95rem',
+                        borderRadius: '6px',
+                        fontSize: '0.875rem',
                         fontWeight: '600',
                         cursor: confirming ? 'not-allowed' : 'pointer',
                         opacity: confirming ? 0.7 : 1,
                         display: 'inline-flex',
                         alignItems: 'center',
                         justifyContent: 'center',
-                        gap: '8px',
+                        gap: '6px',
                         transition: 'all 0.2s ease'
                       }}
                       onMouseEnter={(e) => {
@@ -787,7 +795,7 @@ function MealPlanner() {
                     >
                       {confirming ? (
                         <>
-                          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ animation: 'spin 1s linear infinite' }}>
+                          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16" style={{ animation: 'spin 1s linear infinite' }}>
                             <circle cx="12" cy="12" r="10" strokeDasharray="32" strokeDashoffset="32">
                               <animate attributeName="stroke-dasharray" dur="2s" values="0 32;16 16;0 32;0 32" repeatCount="indefinite"/>
                               <animate attributeName="stroke-dashoffset" dur="2s" values="0;-16;-32;-32" repeatCount="indefinite"/>
@@ -797,7 +805,7 @@ function MealPlanner() {
                         </>
                       ) : (
                         <>
-                          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16">
                             <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
                             <polyline points="22 4 12 14.01 9 11.01"/>
                           </svg>
