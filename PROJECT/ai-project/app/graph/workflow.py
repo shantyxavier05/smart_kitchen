@@ -1,5 +1,6 @@
 """
 LangGraph Workflow: Main orchestration graph for shopping assistant
+Includes OPIK tracing for workflow monitoring
 """
 import logging
 from typing import Literal, Any
@@ -15,6 +16,29 @@ from app.graph.nodes.recipe_app_node import recipe_app_node
 from app.database_helper import DatabaseHelper
 
 logger = logging.getLogger(__name__)
+
+# Initialize OPIK for LangGraph if available
+OPIK_AVAILABLE = False
+try:
+    from app.config import OPIK_API_KEY, OPIK_WORKSPACE, OPIK_ENABLED, OPIK_PROJECT_NAME
+    if OPIK_ENABLED and OPIK_API_KEY:
+        try:
+            import opik
+            # OPIK configure only accepts api_key and workspace
+            opik.configure(
+                api_key=OPIK_API_KEY,
+                workspace=OPIK_WORKSPACE
+            )
+            OPIK_AVAILABLE = True
+            logger.info(f"OPIK configured for LangGraph workflow tracing (project: {OPIK_PROJECT_NAME})")
+        except Exception as e:
+            logger.warning(f"OPIK configuration failed for LangGraph: {e}")
+            OPIK_AVAILABLE = False
+    else:
+        if OPIK_ENABLED:
+            logger.warning("OPIK enabled but API key not configured for LangGraph")
+except ImportError:
+    logger.debug("OPIK not available for LangGraph - install opik package to enable tracing")
 
 
 def route_command(state: ShoppingAssistantState) -> Literal["inventory", "planner", "shopping", "inventory_list", "error"]:
@@ -182,7 +206,13 @@ def create_shopping_assistant_graph(db_helper: DatabaseHelper) -> Any:
     # Compile the graph
     app = workflow.compile()
     
-    logger.info("LangGraph workflow compiled successfully")
+    # OPIK: LangGraph workflows are automatically traced when OPIK is configured
+    # The opik.configure() call above enables automatic tracing of LangGraph execution
+    if OPIK_AVAILABLE:
+        logger.info("LangGraph workflow compiled with OPIK tracing enabled")
+    else:
+        logger.info("LangGraph workflow compiled successfully (OPIK tracing disabled)")
+    
     return app
 
 

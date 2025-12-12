@@ -1,12 +1,53 @@
 """
 LLM Client for generating recipes
 Supports OpenAI API or mock implementation
+Includes OPIK tracing and guardrails for content safety
 """
 import logging
 import json
+import os
 from typing import Dict, Optional
 
 logger = logging.getLogger(__name__)
+
+# Initialize OPIK if available
+OPIK_AVAILABLE = False
+try:
+    from app.config import OPIK_API_KEY, OPIK_WORKSPACE, OPIK_ENABLED, OPIK_PROJECT_NAME
+    if OPIK_ENABLED and OPIK_API_KEY:
+        try:
+            import opik
+            # OPIK configure only accepts api_key and workspace
+            opik.configure(
+                api_key=OPIK_API_KEY,
+                workspace=OPIK_WORKSPACE
+            )
+            # Enable OpenAI integration for automatic tracing
+            # Just importing the module enables automatic tracing of OpenAI SDK calls
+            try:
+                import opik.integrations.openai as opik_openai
+                # The import itself enables automatic tracing
+                logger.info("OPIK OpenAI integration enabled - automatic tracing active")
+            except ImportError:
+                logger.debug("OPIK OpenAI integration not available")
+            OPIK_AVAILABLE = True
+            logger.info(f"OPIK configured successfully for project: {OPIK_PROJECT_NAME}")
+        except Exception as e:
+            logger.warning(f"OPIK configuration failed: {e}")
+            OPIK_AVAILABLE = False
+    else:
+        if OPIK_ENABLED:
+            logger.warning("OPIK enabled but API key not configured")
+except ImportError:
+    logger.warning("OPIK not available - install opik package to enable tracing")
+
+# Import guardrails
+try:
+    from app.guardrails import validate_prompt, validate_llm_response, sanitize_prompt, get_ethical_response_for_illegal_item
+    GUARDRAILS_AVAILABLE = True
+except ImportError as e:
+    logger.warning(f"Guardrails module not available: {e}")
+    GUARDRAILS_AVAILABLE = False
 
 
 class LLMClient:
@@ -14,20 +55,24 @@ class LLMClient:
     
     def __init__(self):
         # Import config to ensure .env is loaded correctly from PROJECT root
-        from app.config import OPENAI_API_KEY, USE_MOCK_LLM
+        from app.config import OPENAI_API_KEY, USE_MOCK_LLM, GUARDRAILS_ENABLED
         
         self.api_key = OPENAI_API_KEY
         # Only use mock if explicitly set to true AND no API key
         self.use_mock = USE_MOCK_LLM or not self.api_key
+        self.guardrails_enabled = GUARDRAILS_ENABLED and GUARDRAILS_AVAILABLE
         
         if self.use_mock:
             logger.warning("Using MOCK LLM - no actual API calls will be made")
         else:
             logger.info("Using OpenAI API for recipe generation")
+        
+        if self.guardrails_enabled:
+            logger.info("Guardrails enabled for content safety")
     
     def generate_recipe(self, prompt: str) -> Dict:
         """
-        Generate a recipe using LLM
+        Generate a recipe using LLM with OPIK tracing and guardrails
         
         Args:
             prompt: Prompt for recipe generation
@@ -35,11 +80,96 @@ class LLMClient:
         Returns:
             Dictionary with recipe details
         """
-        if self.use_mock:
-            logger.warning("MOCK LLM: Recipe generation would use OpenAI API")
-            return self._mock_generate_recipe(prompt)
+        # Guardrails: Validate prompt before processing
+        if self.guardrails_enabled:
+            sanitized_prompt = sanitize_prompt(prompt)
+            is_valid, error_msg = validate_prompt(sanitized_prompt, context="recipe")
+            if not is_valid:
+                logger.warning(f"Guardrails blocked prompt: {error_msg}")
+                logger.debug(f"Blocked prompt (first 500 chars): {sanitized_prompt[:500]}")
+                # Handle illegal food items ethically
+                if error_msg == "ILLEGAL_FOOD_ITEM":
+                    from app.guardrails import get_ethical_response_for_illegal_item
+                    return get_ethical_response_for_illegal_item()
+                return {
+                    "name": "Request Cannot Be Processed",
+                    "description": error_msg or "Prompt validation failed",
+                    "servings": 4,
+                    "ingredients": [],
+                    "instructions": ["I don't have access to recipes or information about restricted or illegal food items. Please try a different recipe request."]
+                }
+            prompt = sanitized_prompt
+        
+        # OPIK tracing - wrap the entire recipe generation
+        if OPIK_AVAILABLE:
+            import opik
+            try:
+                # Use start_as_current_trace context manager
+                # OPIK will automatically trace OpenAI SDK calls when configured
+                # Set flush=True to ensure traces are sent immediately
+                with opik.start_as_current_trace(
+                    name="recipe_generation",
+                    input={"prompt": prompt},
+                    metadata={"model": "gpt-4o-mini"},
+                    flush=True
+                ):
+                    if self.use_mock:
+                        logger.warning("MOCK LLM: Recipe generation would use OpenAI API")
+                        result = self._mock_generate_recipe(prompt)
+                    else:
+                        result = self._openai_generate_recipe(prompt)
+                    
+                    # Guardrails: Validate response
+                    if self.guardrails_enabled:
+                        is_valid, error_msg = validate_llm_response(result)
+                        if not is_valid:
+                            logger.warning(f"Guardrails blocked response: {error_msg}")
+                            # Handle illegal food items ethically
+                            if error_msg == "ILLEGAL_FOOD_ITEM":
+                                from app.guardrails import get_ethical_response_for_illegal_item
+                                result = get_ethical_response_for_illegal_item()
+                            else:
+                                result = {
+                                    "name": "Response Cannot Be Displayed",
+                                    "description": error_msg or "Response validation failed",
+                                    "servings": 4,
+                                    "ingredients": [],
+                                    "instructions": ["I don't have access to recipes or information about restricted or illegal food items. Please try a different recipe request."]
+                                }
+                    
+                    # Trace automatically ends when exiting 'with' block
+                    # OPIK will automatically capture OpenAI SDK calls and output
+                    return result
+            except Exception as e:
+                logger.error(f"Error in OPIK tracing: {e}")
+                # Fall through to non-OPIK path if tracing fails
+                pass
         else:
-            return self._openai_generate_recipe(prompt)
+            # No OPIK - proceed normally but still apply guardrails
+            if self.use_mock:
+                logger.warning("MOCK LLM: Recipe generation would use OpenAI API")
+                result = self._mock_generate_recipe(prompt)
+            else:
+                result = self._openai_generate_recipe(prompt)
+            
+            # Still apply guardrails even without OPIK
+            if self.guardrails_enabled:
+                is_valid, error_msg = validate_llm_response(result)
+                if not is_valid:
+                    logger.warning(f"Guardrails blocked response: {error_msg}")
+                    # Handle illegal food items ethically
+                    if error_msg == "ILLEGAL_FOOD_ITEM":
+                        from app.guardrails import get_ethical_response_for_illegal_item
+                        return get_ethical_response_for_illegal_item()
+                    return {
+                        "name": "Response Cannot Be Displayed",
+                        "description": error_msg or "Response validation failed",
+                        "servings": 4,
+                        "ingredients": [],
+                        "instructions": ["I don't have access to recipes or information about restricted or illegal food items. Please try a different recipe request."]
+                    }
+            
+            return result
     
     def parse_ingredient_text(self, text: str) -> Dict:
         """
@@ -81,6 +211,10 @@ class LLMClient:
             try:
                 recipe = json.loads(content)
                 logger.info(f"Successfully generated recipe: {recipe.get('name', 'Unknown')}")
+                
+                # OPIK automatically traces OpenAI SDK calls when configured
+                # Token usage is captured automatically by OPIK's OpenAI integration
+                
                 return recipe
             except json.JSONDecodeError as e:
                 logger.error(f"Failed to parse JSON from LLM response: {e}")
@@ -172,7 +306,29 @@ class LLMClient:
         }
     
     def _openai_parse_ingredient(self, text: str) -> Dict:
-        """Parse ingredient text using OpenAI API"""
+        """Parse ingredient text using OpenAI API with OPIK tracing"""
+        # OPIK: Trace ingredient parsing
+        if OPIK_AVAILABLE:
+            import opik
+            with opik.start_as_current_trace(
+                name="ingredient_parsing",
+                input={"ingredient_text": text},
+                metadata={"model": "gpt-4o-mini"},
+                flush=True
+            ):
+                try:
+                    result = self._openai_parse_ingredient_internal(text)
+                    # Trace automatically ends when exiting 'with' block
+                    # OPIK will automatically capture OpenAI SDK calls and output
+                    return result
+                except Exception as e:
+                    # Trace will capture the exception automatically
+                    raise
+        else:
+            return self._openai_parse_ingredient_internal(text)
+    
+    def _openai_parse_ingredient_internal(self, text: str) -> Dict:
+        """Internal method for ingredient parsing (called with or without OPIK)"""
         try:
             from openai import OpenAI
             
@@ -256,6 +412,9 @@ Output:"""
             
             unit_lower = parsed['unit'].lower()
             parsed['unit'] = unit_map.get(unit_lower, parsed['unit'])
+            
+            # OPIK automatically captures token usage from OpenAI SDK calls
+            # No manual logging needed - OPIK hooks into OpenAI automatically
             
             return parsed
             

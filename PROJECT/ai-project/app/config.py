@@ -31,3 +31,12 @@ DATABASE_URL = os.getenv(
 # OpenAI API Configuration
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", None)
 USE_MOCK_LLM = os.getenv("USE_MOCK_LLM", "false").lower() == "true"  # Default to false - use LLM by default
+
+# OPIK Configuration
+OPIK_API_KEY = os.getenv("OPIK_API_KEY", None)
+OPIK_WORKSPACE = os.getenv("OPIK_WORKSPACE", None)
+OPIK_ENABLED = os.getenv("OPIK_ENABLED", "true").lower() == "true"
+OPIK_PROJECT_NAME = os.getenv("OPIK_PROJECT_NAME", "smart-kitchen")
+
+# Guardrails Configuration
+GUARDRAILS_ENABLED = os.getenv("GUARDRAILS_ENABLED", "true").lower() == "true"
