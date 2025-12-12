@@ -41,3 +41,4 @@ yarn-error.log*
 # Database (uncomment to exclude from repo)
 # app.db
 
+venv/

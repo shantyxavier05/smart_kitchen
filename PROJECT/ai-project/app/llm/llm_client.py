@@ -5,7 +5,7 @@ Supports OpenAI API or mock implementation
 import logging
 import json
 from typing import Dict, Optional
-
+from opik.integrations.openai import track_openai
 logger = logging.getLogger(__name__)
 
 
@@ -47,7 +47,8 @@ class LLMClient:
             from openai import OpenAI
             
             client = OpenAI(api_key=self.api_key)
-            
+            # Enable Opik tracing for OpenAI client
+            client = track_openai(client)
             response = client.chat.completions.create(
                 model="gpt-4o-mini",  # Using GPT-4o-mini for better quality and lower cost
                 messages=[

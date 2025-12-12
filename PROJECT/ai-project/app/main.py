@@ -1,57 +1,43 @@
 from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
-from typing import List, Optional, Dict
-from pydantic import BaseModel
+from typing import List
+import logging
+import opik
 from . import models, schemas, crud
-from .database import engine, Base, SessionLocal
+from .database import engine, Base
 from .deps import get_db
 from .auth import get_current_user, create_access_token
-from .database_helper import DatabaseHelper, Inventory
-import sys
-import os
-from dotenv import load_dotenv
-import logging
+from .config import OPIK_API_KEY, OPIK_WORKSPACE
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
+Base.metadata.create_all(bind=engine)
+
+app = FastAPI(title="AI Shopping Assistant API")
+
+# Opik integration - Initialize Opik for tracing
 logger = logging.getLogger(__name__)
 
-# Load environment variables
-load_dotenv()
-
-# Add app directory to path for imports
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
-# Import LangGraph components
-try:
-    from .graph.workflow import create_shopping_assistant_graph
-    from .graph.state import ShoppingAssistantState
-    LANGGRAPH_AVAILABLE = True
-except ImportError as e:
-    LANGGRAPH_AVAILABLE = False
-    logger.warning(f"LangGraph components not found: {e}. Install LangGraph dependencies.")
-
-# Create all tables including Inventory
-Base.metadata.create_all(bind=engine)
-logger.info("Database tables created/verified")
-
-app = FastAPI(title="AI Shopping Assistant API with LangGraph")
+# Configure Opik if API key is provided
+if OPIK_API_KEY and OPIK_WORKSPACE:
+    opik.configure(
+        api_key=OPIK_API_KEY,
+        workspace=OPIK_WORKSPACE
+    )
+    logger.info("Opik tracing enabled")
+else:
+    logger.warning("Opik API key or workspace not configured - tracing disabled")
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:3000",
-        "http://127.0.0.1:3000",
-        "http://localhost:5173",
-        "http://127.0.0.1:5173"
+        "http://127.0.0.1:3000"
     ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Auth endpoints (keep existing)
 @app.post("/api/auth/signup", response_model=schemas.UserRead, status_code=status.HTTP_201_CREATED)
 def signup(user: schemas.UserCreate, db: Session = Depends(get_db)):
     db_user = crud.get_user_by_email(db, email=user.email)
@@ -83,153 +69,7 @@ def get_all_users(db: Session = Depends(get_db)):
     users = db.query(models.User).all()
     return users
 
-# Request models for LangGraph endpoints
-class InventoryUpdate(BaseModel):
-    item_name: str
-    quantity: float
-    unit: str = "units"
-
-class InventoryRemove(BaseModel):
-    item_name: str
-    quantity: Optional[float] = None
-
-class MealPlanRequest(BaseModel):
-    preferences: Optional[str] = None
-    servings: Optional[int] = 4
-    cuisine: Optional[str] = None
-    inventory_usage: Optional[str] = "strict"  # "strict" or "main"
-
-# LangGraph Inventory endpoints (user-based)
-@app.get("/api/inventory")
-async def get_inventory(
-    current_user: models.User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    """Get all inventory items for current user"""
-    import logging
-    logger = logging.getLogger(__name__)
-    
-    try:
-        logger.info(f"Fetching inventory for user {current_user.id}")
-        db_helper = DatabaseHelper(db, current_user.id)
-        inventory = db_helper.get_all_inventory()
-        logger.info(f"Found {len(inventory)} items for user {current_user.id}")
-        return {"inventory": inventory}
-    except Exception as e:
-        logger.error(f"Error fetching inventory: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/api/inventory/add")
-async def add_inventory(
-    item: InventoryUpdate,
-    current_user: models.User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    """Add or update inventory item using LangGraph"""
-    import logging
-    logger = logging.getLogger(__name__)
-    
-    try:
-        logger.info(f"Adding item for user {current_user.id}: {item.item_name}, {item.quantity} {item.unit}")
-        db_helper = DatabaseHelper(db, current_user.id)
-        
-        if LANGGRAPH_AVAILABLE:
-            try:
-                graph_app = create_shopping_assistant_graph(db_helper)
-                
-                initial_state: ShoppingAssistantState = {
-                    "command": f"add {item.item_name}",
-                    "command_type": "add",
-                    "item_name": item.item_name,
-                    "quantity": item.quantity,
-                    "unit": item.unit,
-                    "preferences": None,
-                    "servings": None,
-                    "recipe_name": None,
-                    "inventory": [],
-                    "recipe": None,
-                    "shopping_list": [],
-                    "response_text": "",
-                    "response_action": None,
-                    "response_data": None,
-                    "error": None,
-                    "success": False,
-                    "recipe_cache": {},
-                    "thresholds": {}
-                }
-                
-                result = graph_app.invoke(initial_state)
-                logger.info(f"LangGraph result: {result.get('success')}, error: {result.get('error')}")
-                
-                if result.get("error"):
-                    raise HTTPException(status_code=400, detail=result.get("error"))
-                
-                return {"message": "Item added successfully", "item": result.get("response_data")}
-            except Exception as langgraph_error:
-                logger.error(f"LangGraph error: {str(langgraph_error)}")
-                # Fall through to direct database helper
-                logger.info("Falling back to direct database helper")
-        
-        # Fallback to direct database helper
-        db_helper.add_item(item.item_name, item.quantity, item.unit)
-        added_item = db_helper.get_item(item.item_name)
-        logger.info(f"Item added successfully via direct helper: {added_item}")
-        return {"message": "Item added successfully", "item": added_item}
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error adding inventory item: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Error adding item: {str(e)}")
-
-@app.post("/api/inventory/remove")
-async def remove_inventory(
-    item: InventoryRemove,
-    current_user: models.User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    """Remove inventory item using LangGraph"""
-    try:
-        db_helper = DatabaseHelper(db, current_user.id)
-        
-        if LANGGRAPH_AVAILABLE:
-            graph_app = create_shopping_assistant_graph(db_helper)
-            
-            initial_state: ShoppingAssistantState = {
-                "command": f"remove {item.item_name}",
-                "command_type": "remove",
-                "item_name": item.item_name,
-                "quantity": item.quantity,
-                "unit": None,
-                "preferences": None,
-                "servings": None,
-                "recipe_name": None,
-                "inventory": [],
-                "recipe": None,
-                "shopping_list": [],
-                "response_text": "",
-                "response_action": None,
-                "response_data": None,
-                "error": None,
-                "success": False,
-                "recipe_cache": {},
-                "thresholds": {}
-            }
-            
-            result = graph_app.invoke(initial_state)
-            return {"message": "Item removed successfully", "item": result.get("response_data")}
-        else:
-            # Fallback to direct database helper
-            if item.quantity is None:
-                db_helper.delete_item(item.item_name)
-            else:
-                db_helper.reduce_quantity(item.item_name, item.quantity)
-            return {"message": "Item removed successfully"}
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-# Keep old endpoint for backward compatibility (optional)
+# Inventory endpoints
 @app.post("/api/inventory", response_model=schemas.InventoryItemRead, status_code=status.HTTP_201_CREATED)
 def create_inventory_item(
     item: schemas.InventoryItemCreate,
@@ -237,6 +77,13 @@ def create_inventory_item(
     db: Session = Depends(get_db)
 ):
     return crud.create_inventory_item(db=db, item=item, user_id=current_user.id)
+
+@app.get("/api/inventory", response_model=List[schemas.InventoryItemRead])
+def get_inventory_items(
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    return crud.get_user_inventory_items(db=db, user_id=current_user.id)
 
 @app.delete("/api/inventory/{item_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_inventory_item(
@@ -254,141 +101,9 @@ def delete_inventory_item(
 
 @app.get("/")
 def root():
-    return {"message": "AI Shopping Assistant API with LangGraph is running"}
+    return {"message": "AI Shopping Assistant API is running"}
 
-@app.get("/health")
-async def health():
-    return {"status": "healthy", "version": "2.0.0", "orchestration": "langgraph" if LANGGRAPH_AVAILABLE else "direct"}
+@app.get("/favicon.ico")
+def favicon():
+    return {"message": "No favicon"}
 
-@app.post("/api/meal-plan/generate")
-async def generate_meal_plan(
-    request: MealPlanRequest,
-    current_user: models.User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    """Generate a meal plan based on user preferences and inventory"""
-    import logging
-    logger = logging.getLogger(__name__)
-    
-    try:
-        logger.info(f"Generating meal plan for user {current_user.id}: preferences={request.preferences}, servings={request.servings}")
-        db_helper = DatabaseHelper(db, current_user.id)
-        
-        if LANGGRAPH_AVAILABLE:
-            try:
-                graph_app = create_shopping_assistant_graph(db_helper)
-                
-                # Create command based on preferences
-                command = request.preferences or "suggest a recipe"
-                if "recipe" not in command.lower() and "meal" not in command.lower():
-                    command = f"suggest a recipe {command}"
-                
-                # Build comprehensive preferences
-                full_preferences = []
-                if request.cuisine:
-                    full_preferences.append(f"{request.cuisine} cuisine")
-                if request.preferences:
-                    full_preferences.append(request.preferences)
-                preferences_str = ". ".join(full_preferences) if full_preferences else request.preferences
-                
-                initial_state: ShoppingAssistantState = {
-                    "command": command,
-                    "command_type": "recipe",
-                    "item_name": None,
-                    "quantity": None,
-                    "unit": None,
-                    "preferences": preferences_str,
-                    "servings": request.servings,
-                    "recipe_name": None,
-                    "inventory": [],
-                    "recipe": None,
-                    "shopping_list": [],
-                    "response_text": "",
-                    "response_action": None,
-                    "response_data": None,
-                    "error": None,
-                    "success": False,
-                    "recipe_cache": {},
-                    "thresholds": {}
-                }
-                
-                result = graph_app.invoke(initial_state)
-                logger.info(f"Meal plan generated: success={result.get('success')}, error={result.get('error')}")
-                
-                if result.get("error"):
-                    raise HTTPException(status_code=400, detail=result.get("error"))
-                
-                recipe = result.get("recipe")
-                if not recipe:
-                    raise HTTPException(status_code=500, detail="Failed to generate meal plan")
-                
-                return {
-                    "message": "Meal plan generated successfully",
-                    "recipe": recipe,
-                    "response_text": result.get("response_text", "")
-                }
-            except HTTPException:
-                raise
-            except Exception as langgraph_error:
-                logger.error(f"LangGraph error: {str(langgraph_error)}", exc_info=True)
-                # Fall through to direct planner agent
-                logger.info("Falling back to direct planner agent")
-        
-        # Fallback to direct planner agent
-        from .agents.planner_agent import PlannerAgent
-        planner_agent = PlannerAgent(db_helper)
-        
-        # Build comprehensive preferences
-        full_preferences = []
-        if request.cuisine:
-            full_preferences.append(f"{request.cuisine} cuisine")
-        if request.preferences:
-            full_preferences.append(request.preferences)
-        preferences_str = ". ".join(full_preferences) if full_preferences else request.preferences
-        
-        recipe = planner_agent.suggest_recipe(preferences_str, request.servings)
-        
-        logger.info(f"Meal plan generated via direct agent: {recipe.get('name', 'Unknown')}")
-        return {
-            "message": "Meal plan generated successfully",
-            "recipe": recipe,
-            "response_text": f"I suggest making {recipe.get('name', 'a recipe')}."
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error generating meal plan: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Error generating meal plan: {str(e)}")
-
-@app.get("/api/debug/inventory")
-async def debug_inventory(
-    current_user: models.User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    """Debug endpoint to check inventory status"""
-    import logging
-    logger = logging.getLogger(__name__)
-    
-    try:
-        db_helper = DatabaseHelper(db, current_user.id)
-        
-        # Check if table exists
-        from sqlalchemy import inspect
-        inspector = inspect(db)
-        tables = inspector.get_table_names()
-        
-        # Get inventory count
-        inventory = db_helper.get_all_inventory()
-        
-        return {
-            "user_id": current_user.id,
-            "tables": tables,
-            "inventory_table_exists": "inventory" in tables,
-            "inventory_count": len(inventory),
-            "inventory_items": inventory,
-            "langgraph_available": LANGGRAPH_AVAILABLE
-        }
-    except Exception as e:
-        logger.error(f"Debug error: {str(e)}", exc_info=True)
-        return {"error": str(e)}
