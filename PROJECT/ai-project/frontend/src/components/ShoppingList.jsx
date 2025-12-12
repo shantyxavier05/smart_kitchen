@@ -3,24 +3,75 @@ import UserMenu from './UserMenu'
 
 function ShoppingList() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
-  const [items, setItems] = useState([
-    { id: 1, name: 'Whole Wheat Bread', quantity: '1 loaf', checked: false },
-    { id: 2, name: 'Avocados', quantity: '3 ripe', checked: false },
-    { id: 3, name: 'Chicken Breasts', quantity: '2 lbs', checked: true },
-    { id: 4, name: 'Broccoli', quantity: '1 head', checked: false },
-    { id: 5, name: 'Brown Rice', quantity: '1 bag (2 lbs)', checked: false },
-    { id: 6, name: 'Cherry Tomatoes', quantity: '1 pint', checked: false },
-  ])
+  const [items, setItems] = useState([])
 
   const [selectAll, setSelectAll] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
   const [success, setSuccess] = useState(null)
+  const [fetching, setFetching] = useState(true)
 
-  const handleItemToggle = (id) => {
-    setItems(items.map(item => 
-      item.id === id ? { ...item, checked: !item.checked } : item
-    ))
+  // Fetch shopping list items from API
+  useEffect(() => {
+    const fetchShoppingList = async () => {
+      const token = localStorage.getItem('token')
+      if (!token) {
+        setFetching(false)
+        return
+      }
+
+      try {
+        const response = await fetch('http://localhost:8000/api/shopping-list', {
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
+        })
+
+        if (response.ok) {
+          const data = await response.json()
+          setItems(data.items || [])
+        } else {
+          console.error('Failed to fetch shopping list')
+        }
+      } catch (err) {
+        console.error('Error fetching shopping list:', err)
+      } finally {
+        setFetching(false)
+      }
+    }
+
+    fetchShoppingList()
+  }, [])
+
+  const handleItemToggle = async (id) => {
+    const token = localStorage.getItem('token')
+    if (!token) {
+      setError('You must be logged in to toggle items')
+      return
+    }
+
+    try {
+      const response = await fetch(`http://localhost:8000/api/shopping-list/${id}/toggle`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      })
+
+      if (response.ok) {
+        const data = await response.json()
+        // Update local state
+        setItems(items.map(item => 
+          item.id === id ? { ...item, checked: data.item.checked } : item
+        ))
+      } else {
+        const errorData = await response.json().catch(() => ({}))
+        setError(errorData.detail || 'Failed to toggle item')
+      }
+    } catch (err) {
+      setError('Error toggling item. Please try again.')
+      console.error('Error toggling item:', err)
+    }
   }
 
   const handleSelectAll = () => {
@@ -292,8 +343,25 @@ function ShoppingList() {
 
       await Promise.all(addPromises)
       
-      // Success - uncheck all items and show success message
-      setItems(items.map(item => ({ ...item, checked: false })))
+      // Delete items from shopping list
+      const deletePromises = selectedItems.map(async (item) => {
+        const response = await fetch(`http://localhost:8000/api/shopping-list/${item.id}`, {
+          method: 'DELETE',
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
+        })
+        
+        if (!response.ok) {
+          console.warn(`Failed to delete shopping list item ${item.id}`)
+        }
+      })
+      
+      await Promise.all(deletePromises)
+      
+      // Remove added items from local state
+      const remainingItems = items.filter(item => !selectedItems.some(selected => selected.id === item.id))
+      setItems(remainingItems)
       setSelectAll(false)
       setSuccess(`Successfully added ${selectedItems.length} item(s) to inventory!`)
       setError(null)
@@ -408,46 +476,89 @@ function ShoppingList() {
 
           {/* Shopping List Items */}
           <div className="shopping-list-items">
-            {/* Select All Header */}
-            <div className="shopping-list-item-header">
-              <label className="checkbox-label header-checkbox">
-                <input
-                  type="checkbox"
-                  checked={selectAll}
-                  onChange={handleSelectAll}
-                  className="custom-checkbox"
-                />
-                <span className="checkbox-custom"></span>
-                <span className="item-header-text">ITEM ({items.length})</span>
-              </label>
-            </div>
-
-            {/* Individual Items */}
-            {items.map((item) => (
-              <div key={item.id} className={`shopping-list-item ${item.checked ? 'checked' : ''}`}>
-                <label className="checkbox-label">
-                  <input
-                    type="checkbox"
-                    checked={item.checked}
-                    onChange={() => handleItemToggle(item.id)}
-                    className="custom-checkbox"
-                  />
-                  <span className={`checkbox-custom ${item.checked ? 'checked' : ''}`}>
-                    {item.checked && (
-                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
-                        <polyline points="20 6 9 17 4 12"/>
-                      </svg>
-                    )}
-                  </span>
-                  <div className="item-details">
-                    <span className={`item-name ${item.checked ? 'strikethrough' : ''}`}>
-                      {item.name}
-                    </span>
-                    <span className="item-quantity">{item.quantity}</span>
-                  </div>
-                </label>
+            {fetching ? (
+              <div style={{
+                padding: '40px',
+                textAlign: 'center',
+                color: '#6b7280'
+              }}>
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ 
+                  width: '48px', 
+                  height: '48px', 
+                  margin: '0 auto 16px',
+                  animation: 'spin 1s linear infinite'
+                }}>
+                  <circle cx="12" cy="12" r="10" strokeDasharray="32" strokeDashoffset="32">
+                    <animate attributeName="stroke-dasharray" dur="2s" values="0 32;16 16;0 32;0 32" repeatCount="indefinite"/>
+                    <animate attributeName="stroke-dashoffset" dur="2s" values="0;-16;-32;-32" repeatCount="indefinite"/>
+                  </circle>
+                </svg>
+                <p>Loading shopping list...</p>
               </div>
-            ))}
+            ) : items.length === 0 ? (
+              <div style={{
+                padding: '40px',
+                textAlign: 'center',
+                color: '#6b7280'
+              }}>
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" style={{ 
+                  width: '64px', 
+                  height: '64px', 
+                  margin: '0 auto 16px',
+                  opacity: 0.5
+                }}>
+                  <path d="M9 2v4M15 2v4M3 10h18M5 4h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z"/>
+                  <line x1="9" y1="14" x2="15" y2="14"/>
+                </svg>
+                <p style={{ fontSize: '1.1rem', marginBottom: '8px' }}>Your shopping list is empty</p>
+                <p style={{ fontSize: '0.9rem', opacity: 0.8 }}>
+                  Items will appear here when you confirm a meal plan with ingredients not in your inventory.
+                </p>
+              </div>
+            ) : (
+              <>
+                {/* Select All Header */}
+                <div className="shopping-list-item-header">
+                  <label className="checkbox-label header-checkbox">
+                    <input
+                      type="checkbox"
+                      checked={selectAll}
+                      onChange={handleSelectAll}
+                      className="custom-checkbox"
+                    />
+                    <span className="checkbox-custom"></span>
+                    <span className="item-header-text">ITEM ({items.length})</span>
+                  </label>
+                </div>
+
+                {/* Individual Items */}
+                {items.map((item) => (
+                  <div key={item.id} className={`shopping-list-item ${item.checked ? 'checked' : ''}`}>
+                    <label className="checkbox-label">
+                      <input
+                        type="checkbox"
+                        checked={item.checked}
+                        onChange={() => handleItemToggle(item.id)}
+                        className="custom-checkbox"
+                      />
+                      <span className={`checkbox-custom ${item.checked ? 'checked' : ''}`}>
+                        {item.checked && (
+                          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
+                            <polyline points="20 6 9 17 4 12"/>
+                          </svg>
+                        )}
+                      </span>
+                      <div className="item-details">
+                        <span className={`item-name ${item.checked ? 'strikethrough' : ''}`}>
+                          {item.name}
+                        </span>
+                        <span className="item-quantity">{item.quantity}</span>
+                      </div>
+                    </label>
+                  </div>
+                ))}
+              </>
+            )}
           </div>
 
           {/* Error/Success Messages */}
