@@ -14,6 +14,9 @@ function MealPlanner() {
   const [isListening, setIsListening] = useState(false)
   const [voiceError, setVoiceError] = useState(null)
   const recognitionRef = useRef(null)
+  const [confirming, setConfirming] = useState(false)
+  const [confirmSuccess, setConfirmSuccess] = useState(null)
+  const [confirmError, setConfirmError] = useState(null)
 
   const handleGenerate = async () => {
     setLoading(true)
@@ -177,6 +180,69 @@ function MealPlanner() {
       setVoiceError('Failed to start voice input. Please try again.')
       setTimeout(() => setVoiceError(null), 5000)
       setIsListening(false)
+    }
+  }
+
+  const handleConfirmMeal = async () => {
+    if (!mealPlan || !mealPlan.ingredients || mealPlan.ingredients.length === 0) {
+      setConfirmError('No meal plan to confirm. Please generate a meal plan first.')
+      setTimeout(() => setConfirmError(null), 5000)
+      return
+    }
+
+    setConfirming(true)
+    setConfirmError(null)
+    setConfirmSuccess(null)
+
+    const token = localStorage.getItem('token')
+    if (!token) {
+      setConfirmError('You must be logged in to confirm a meal plan')
+      setConfirming(false)
+      return
+    }
+
+    try {
+      const response = await fetch('http://localhost:8000/api/meal-plan/confirm', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          ingredients: mealPlan.ingredients
+        })
+      })
+
+      const data = await response.json()
+
+      if (response.ok) {
+        const addedCount = data.items_added_to_shopping_list?.length || 0
+        const reducedCount = data.items_reduced_from_inventory?.length || 0
+        const deletedCount = data.items_deleted_from_inventory?.length || 0
+        
+        let successMessage = 'Meal plan confirmed! '
+        if (addedCount > 0) {
+          successMessage += `${addedCount} item(s) added to shopping list. `
+        }
+        if (reducedCount > 0) {
+          successMessage += `${reducedCount} item(s) updated in inventory. `
+        }
+        if (deletedCount > 0) {
+          successMessage += `${deletedCount} item(s) removed from inventory (fully used). `
+        }
+        
+        setConfirmSuccess(successMessage)
+        setTimeout(() => setConfirmSuccess(null), 5000)
+      } else {
+        setConfirmError(data.detail || data.message || 'Failed to confirm meal plan')
+        setTimeout(() => setConfirmError(null), 5000)
+      }
+    } catch (err) {
+      setConfirmError(err.message || 'Error confirming meal plan. Please try again.')
+      setTimeout(() => setConfirmError(null), 5000)
+      console.error('Error confirming meal plan:', err)
+    } finally {
+      setConfirming(false)
     }
   }
 
@@ -637,6 +703,116 @@ function MealPlanner() {
                     <p style={{ color: '#15803d', margin: 0, lineHeight: '1.6' }}>
                       To get AI-powered recipes with detailed ingredients and instructions, make sure you have items in your inventory.
                       Visit the <a href="#inventory" style={{ color: '#16a34a', fontWeight: 600, textDecoration: 'underline' }}>Inventory page</a> to add ingredients.
+                    </p>
+                  </div>
+                )}
+
+                {/* Confirm Meal Button */}
+                {mealPlan && mealPlan.ingredients && mealPlan.ingredients.length > 0 && (
+                  <div style={{ marginTop: '32px', paddingTop: '24px', borderTop: '2px solid #e5e7eb' }}>
+                    {confirmSuccess && (
+                      <div style={{
+                        padding: '16px 20px',
+                        marginBottom: '16px',
+                        backgroundColor: '#f0fdf4',
+                        color: '#166534',
+                        borderRadius: '8px',
+                        border: '1px solid #bbf7d0',
+                        display: 'flex',
+                        gap: '12px',
+                        alignItems: 'flex-start'
+                      }}>
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0, marginTop: '2px' }}>
+                          <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+                          <polyline points="22 4 12 14.01 9 11.01"/>
+                        </svg>
+                        <div style={{ flex: 1 }}>
+                          <strong style={{ display: 'block', marginBottom: '4px' }}>Success!</strong>
+                          <p style={{ margin: 0, lineHeight: '1.6' }}>{confirmSuccess}</p>
+                        </div>
+                      </div>
+                    )}
+                    {confirmError && (
+                      <div style={{
+                        padding: '16px 20px',
+                        marginBottom: '16px',
+                        backgroundColor: '#fee2e2',
+                        color: '#991b1b',
+                        borderRadius: '8px',
+                        border: '1px solid #fecaca',
+                        display: 'flex',
+                        gap: '12px',
+                        alignItems: 'flex-start'
+                      }}>
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0, marginTop: '2px' }}>
+                          <circle cx="12" cy="12" r="10"/>
+                          <line x1="12" y1="8" x2="12" y2="12"/>
+                          <line x1="12" y1="16" x2="12.01" y2="16"/>
+                        </svg>
+                        <div style={{ flex: 1 }}>
+                          <strong style={{ display: 'block', marginBottom: '4px' }}>Error</strong>
+                          <p style={{ margin: 0, lineHeight: '1.6' }}>{confirmError}</p>
+                        </div>
+                      </div>
+                    )}
+                    <button
+                      onClick={handleConfirmMeal}
+                      disabled={confirming}
+                      style={{
+                        padding: '12px 20px',
+                        backgroundColor: '#16a34a',
+                        color: 'white',
+                        border: 'none',
+                        borderRadius: '8px',
+                        fontSize: '0.95rem',
+                        fontWeight: '600',
+                        cursor: confirming ? 'not-allowed' : 'pointer',
+                        opacity: confirming ? 0.7 : 1,
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '8px',
+                        transition: 'all 0.2s ease'
+                      }}
+                      onMouseEnter={(e) => {
+                        if (!confirming) {
+                          e.target.style.backgroundColor = '#15803d'
+                        }
+                      }}
+                      onMouseLeave={(e) => {
+                        if (!confirming) {
+                          e.target.style.backgroundColor = '#16a34a'
+                        }
+                      }}
+                    >
+                      {confirming ? (
+                        <>
+                          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ animation: 'spin 1s linear infinite' }}>
+                            <circle cx="12" cy="12" r="10" strokeDasharray="32" strokeDashoffset="32">
+                              <animate attributeName="stroke-dasharray" dur="2s" values="0 32;16 16;0 32;0 32" repeatCount="indefinite"/>
+                              <animate attributeName="stroke-dashoffset" dur="2s" values="0;-16;-32;-32" repeatCount="indefinite"/>
+                            </circle>
+                          </svg>
+                          Confirming...
+                        </>
+                      ) : (
+                        <>
+                          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+                            <polyline points="22 4 12 14.01 9 11.01"/>
+                          </svg>
+                          Confirm Meal Plan
+                        </>
+                      )}
+                    </button>
+                    <p style={{
+                      marginTop: '12px',
+                      fontSize: '0.875rem',
+                      color: '#6b7280',
+                      textAlign: 'center',
+                      lineHeight: '1.5'
+                    }}>
+                      This will update your inventory and add missing items to your shopping list.
                     </p>
                   </div>
                 )}

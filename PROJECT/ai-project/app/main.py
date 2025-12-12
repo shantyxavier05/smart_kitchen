@@ -99,6 +99,13 @@ class MealPlanRequest(BaseModel):
     cuisine: Optional[str] = None
     inventory_usage: Optional[str] = "strict"  # "strict" or "main"
 
+class ConfirmMealPlanRequest(BaseModel):
+    ingredients: List[Dict]  # List of ingredients with name, quantity, unit
+
+class ShoppingListItemUpdate(BaseModel):
+    name: str
+    quantity: str
+
 # LangGraph Inventory endpoints (user-based)
 @app.get("/api/inventory")
 async def get_inventory(
@@ -469,3 +476,278 @@ async def debug_inventory(
     except Exception as e:
         logger.error(f"Debug error: {str(e)}", exc_info=True)
         return {"error": str(e)}
+
+# Shopping List endpoints
+@app.get("/api/shopping-list")
+async def get_shopping_list(
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Get all shopping list items for current user"""
+    try:
+        db_helper = DatabaseHelper(db, current_user.id)
+        items = db_helper.get_all_shopping_list_items()
+        return {"items": items}
+    except Exception as e:
+        logger.error(f"Error fetching shopping list: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/shopping-list/add")
+async def add_shopping_list_item(
+    item: ShoppingListItemUpdate,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Add an item to shopping list"""
+    try:
+        db_helper = DatabaseHelper(db, current_user.id)
+        added_item = db_helper.add_shopping_list_item(item.name, item.quantity)
+        return {"message": "Item added to shopping list", "item": added_item}
+    except Exception as e:
+        logger.error(f"Error adding shopping list item: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/shopping-list/{item_id}/toggle")
+async def toggle_shopping_list_item(
+    item_id: int,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Toggle checked status of a shopping list item"""
+    try:
+        db_helper = DatabaseHelper(db, current_user.id)
+        updated_item = db_helper.toggle_shopping_list_item(item_id)
+        return {"message": "Item toggled", "item": updated_item}
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error toggling shopping list item: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/api/shopping-list/{item_id}")
+async def delete_shopping_list_item(
+    item_id: int,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Delete a shopping list item"""
+    try:
+        db_helper = DatabaseHelper(db, current_user.id)
+        db_helper.delete_shopping_list_item(item_id)
+        return {"message": "Item deleted from shopping list"}
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error deleting shopping list item: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Confirm meal plan endpoint
+@app.post("/api/meal-plan/confirm")
+async def confirm_meal_plan(
+    request: ConfirmMealPlanRequest,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Confirm a meal plan:
+    - Items in inventory: reduce quantity (delete if reaches 0)
+    - Items NOT in inventory: add to shopping list
+    """
+    try:
+        db_helper = DatabaseHelper(db, current_user.id)
+        
+        # Get current inventory
+        inventory = db_helper.get_all_inventory()
+        inventory_dict = {item['name'].lower(): item for item in inventory}
+        
+        items_added_to_shopping_list = []
+        items_reduced_from_inventory = []
+        items_deleted_from_inventory = []
+        
+        for ingredient in request.ingredients:
+            ingredient_name = ingredient.get('name', '').strip()
+            ingredient_quantity = ingredient.get('quantity', 0)
+            ingredient_unit = ingredient.get('unit', 'units')
+            
+            if not ingredient_name:
+                continue
+            
+            logger.info(f"Processing ingredient: {ingredient_name} ({ingredient_quantity} {ingredient_unit})")
+            
+            # Use fuzzy matching to find item in inventory
+            inventory_item = db_helper.find_item_fuzzy(ingredient_name)
+            
+            # If fuzzy match didn't work, try exact case-insensitive match and partial matching
+            if not inventory_item:
+                ingredient_name_lower = ingredient_name.lower().strip()
+                # Remove common words that might differ (e.g., "fresh", "dried", "chopped")
+                ingredient_clean = ingredient_name_lower.replace('fresh', '').replace('dried', '').replace('chopped', '').replace('sliced', '').strip()
+                
+                for inv_name, inv_item in inventory_dict.items():
+                    inv_name_clean = inv_name.replace('fresh', '').replace('dried', '').replace('chopped', '').replace('sliced', '').strip()
+                    
+                    # Try exact match
+                    if inv_name == ingredient_name_lower or inv_name_clean == ingredient_clean:
+                        inventory_item = inv_item
+                        logger.info(f"Matched '{ingredient_name}' to inventory item '{inv_item['name']}' (exact)")
+                        break
+                    # Try partial match (e.g., "chicken breast" matches "chicken")
+                    elif ingredient_name_lower in inv_name or inv_name in ingredient_name_lower:
+                        inventory_item = inv_item
+                        logger.info(f"Matched '{ingredient_name}' to inventory item '{inv_item['name']}' (partial)")
+                        break
+                    # Try cleaned partial match
+                    elif ingredient_clean in inv_name_clean or inv_name_clean in ingredient_clean:
+                        inventory_item = inv_item
+                        logger.info(f"Matched '{ingredient_name}' to inventory item '{inv_item['name']}' (cleaned partial)")
+                        break
+            
+            if inventory_item:
+                logger.info(f"Found inventory item: {inventory_item['name']} ({inventory_item['quantity']} {inventory_item['unit']})")
+                # Item exists in inventory - reduce quantity
+                try:
+                    # Convert ingredient quantity to float for comparison
+                    try:
+                        qty_needed = float(ingredient_quantity)
+                    except (ValueError, TypeError):
+                        # If quantity is a string like "1 loaf", try to extract number
+                        import re
+                        match = re.search(r'(\d+(?:\.\d+)?)', str(ingredient_quantity))
+                        if match:
+                            qty_needed = float(match.group(1))
+                        else:
+                            qty_needed = 1.0
+                    
+                    # Check if units match (more flexible matching)
+                    inv_unit = inventory_item.get('unit', 'units').lower().strip()
+                    ing_unit = ingredient_unit.lower().strip()
+                    
+                    # Normalize common unit variations
+                    unit_aliases = {
+                        'unit': ['units', 'unit', 'piece', 'pieces', 'pcs'],
+                        'cup': ['cups', 'cup', 'c'],
+                        'tbsp': ['tablespoon', 'tablespoons', 'tbsp', 'tbs'],
+                        'tsp': ['teaspoon', 'teaspoons', 'tsp'],
+                        'lb': ['pound', 'pounds', 'lb', 'lbs'],
+                        'kg': ['kilogram', 'kilograms', 'kg'],
+                        'g': ['gram', 'grams', 'g'],
+                        'oz': ['ounce', 'ounces', 'oz'],
+                        'ml': ['milliliter', 'milliliters', 'ml'],
+                        'l': ['liter', 'liters', 'l', 'litre', 'litres']
+                    }
+                    
+                    # Check if units match
+                    units_match = False
+                    if inv_unit == ing_unit:
+                        units_match = True
+                    else:
+                        # Check if they're in the same alias group
+                        for base_unit, aliases in unit_aliases.items():
+                            if inv_unit in aliases and ing_unit in aliases:
+                                units_match = True
+                                break
+                    
+                    # Also allow if both are numeric units (units, unit, piece, etc.)
+                    if not units_match:
+                        numeric_units = ['units', 'unit', 'piece', 'pieces', 'pcs', 'item', 'items']
+                        if inv_unit in numeric_units and ing_unit in numeric_units:
+                            units_match = True
+                    
+                    logger.info(f"Unit matching: '{inv_unit}' vs '{ing_unit}' = {units_match}")
+                    
+                    old_quantity = inventory_item['quantity']
+                    
+                    if units_match and old_quantity >= qty_needed:
+                        # We have enough in inventory - just reduce
+                        logger.info(f"Reducing {qty_needed} from {inventory_item['name']} (had {old_quantity})")
+                        db_helper.reduce_quantity(inventory_item['name'], qty_needed)
+                        
+                        # Refresh inventory to get updated state
+                        updated_item = db_helper.get_item(inventory_item['name'])
+                        if updated_item is None:
+                            logger.info(f"Item {inventory_item['name']} was deleted (quantity reached 0)")
+                            # Remove from inventory_dict
+                            if inventory_item['name'].lower() in inventory_dict:
+                                del inventory_dict[inventory_item['name'].lower()]
+                            items_deleted_from_inventory.append({
+                                "name": inventory_item['name'],
+                                "old_quantity": old_quantity,
+                                "unit": inventory_item['unit']
+                            })
+                        else:
+                            logger.info(f"Item {inventory_item['name']} reduced to {updated_item['quantity']}")
+                            # Update inventory_dict
+                            inventory_dict[inventory_item['name'].lower()] = updated_item
+                            items_reduced_from_inventory.append({
+                                "name": inventory_item['name'],
+                                "old_quantity": old_quantity,
+                                "new_quantity": updated_item['quantity'],
+                                "unit": inventory_item['unit']
+                            })
+                    elif units_match and old_quantity < qty_needed:
+                        # We don't have enough - reduce what we have and add remainder to shopping list
+                        logger.info(f"Not enough {inventory_item['name']}: need {qty_needed}, have {old_quantity}")
+                        db_helper.reduce_quantity(inventory_item['name'], old_quantity)
+                        
+                        # Remove from inventory_dict since it's deleted
+                        if inventory_item['name'].lower() in inventory_dict:
+                            del inventory_dict[inventory_item['name'].lower()]
+                        
+                        items_deleted_from_inventory.append({
+                            "name": inventory_item['name'],
+                            "old_quantity": old_quantity,
+                            "unit": inventory_item['unit']
+                        })
+                        
+                        # Add remaining quantity to shopping list
+                        remaining_qty = qty_needed - old_quantity
+                        quantity_str = f"{remaining_qty} {ingredient_unit}" if ingredient_unit != 'units' else str(remaining_qty)
+                        db_helper.add_shopping_list_item(ingredient_name, quantity_str)
+                        items_added_to_shopping_list.append({
+                            "name": ingredient_name,
+                            "quantity": quantity_str
+                        })
+                    else:
+                        # Units don't match - add full amount to shopping list
+                        logger.info(f"Units don't match for {ingredient_name}: inventory has '{inv_unit}', recipe needs '{ing_unit}'")
+                        quantity_str = f"{ingredient_quantity} {ingredient_unit}" if ingredient_unit != 'units' else str(ingredient_quantity)
+                        db_helper.add_shopping_list_item(ingredient_name, quantity_str)
+                        items_added_to_shopping_list.append({
+                            "name": ingredient_name,
+                            "quantity": quantity_str
+                        })
+                except Exception as e:
+                    logger.error(f"Error processing {ingredient_name}: {str(e)}", exc_info=True)
+                    # Fallback: add to shopping list
+                    quantity_str = f"{ingredient_quantity} {ingredient_unit}" if ingredient_unit != 'units' else str(ingredient_quantity)
+                    try:
+                        db_helper.add_shopping_list_item(ingredient_name, quantity_str)
+                        items_added_to_shopping_list.append({
+                            "name": ingredient_name,
+                            "quantity": quantity_str
+                        })
+                    except Exception as e2:
+                        logger.error(f"Could not add {ingredient_name} to shopping list: {str(e2)}", exc_info=True)
+            else:
+                logger.info(f"No match found for '{ingredient_name}' - adding to shopping list")
+                # Item NOT in inventory - add to shopping list
+                quantity_str = f"{ingredient_quantity} {ingredient_unit}" if ingredient_unit != 'units' else str(ingredient_quantity)
+                try:
+                    db_helper.add_shopping_list_item(ingredient_name, quantity_str)
+                    items_added_to_shopping_list.append({
+                        "name": ingredient_name,
+                        "quantity": quantity_str
+                    })
+                except Exception as e:
+                    logger.warning(f"Could not add {ingredient_name} to shopping list: {str(e)}")
+        
+        return {
+            "message": "Meal plan confirmed",
+            "items_added_to_shopping_list": items_added_to_shopping_list,
+            "items_reduced_from_inventory": items_reduced_from_inventory,
+            "items_deleted_from_inventory": items_deleted_from_inventory
+        }
+        
+    except Exception as e:
+        logger.error(f"Error confirming meal plan: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error confirming meal plan: {str(e)}")
