@@ -305,21 +305,29 @@ class DatabaseHelper:
             raise ValueError("Item name cannot be empty")
         
         try:
+            logger.info(f"=== DELETE_ITEM DEBUG ===")
+            logger.info(f"Deleting item: '{name}' for user_id: {self.user_id}")
+            
             item = self.db.query(Inventory).filter(
                 Inventory.user_id == self.user_id,
                 Inventory.name.ilike(name)
             ).first()
             
+            logger.info(f"Query result: {item}")
+            
             if not item:
+                logger.error(f"Item '{name}' not found for user {self.user_id}")
                 raise ValueError(f"Item '{name}' not found for this user")
+            
+            logger.info(f"Found item to delete: id={item.id}, name='{item.name}', qty={item.quantity}, unit={item.unit}")
             
             self.db.delete(item)
             self.db.commit()
-            logger.info(f"Deleted item: {name}")
+            logger.info(f"✅ Successfully deleted item: {name}")
                 
         except Exception as e:
             self.db.rollback()
-            logger.error(f"Error deleting item: {str(e)}")
+            logger.error(f"❌ Error deleting item '{name}': {str(e)}", exc_info=True)
             raise
     
     def clear_inventory(self) -> None:

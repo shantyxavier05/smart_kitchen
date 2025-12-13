@@ -169,23 +169,32 @@ class InventoryAgent:
             from app.utils.unit_converter import UnitConverter
             unit_converter = UnitConverter()
             
+            logger.info(f"=== REMOVE ITEM DEBUG ===")
+            logger.info(f"Item name received: '{item_name}' (type: {type(item_name)})")
+            logger.info(f"Quantity: {quantity}, Unit: {unit}")
+            
             # Normalize item name
             item_name_normalized = item_name.lower().strip() if item_name else ""
+            logger.info(f"Item name normalized: '{item_name_normalized}'")
             
             # Find existing item
             existing = self.db_helper.find_item_fuzzy(item_name_normalized)
+            logger.info(f"Found existing item: {existing}")
             
             if not existing:
+                logger.error(f"Item '{item_name}' not found in inventory!")
                 raise ValueError(f"Item '{item_name}' not found in inventory.")
             
             existing_name = existing["name"]
             existing_qty = existing["quantity"]
             existing_unit = existing["unit"]
+            logger.info(f"Existing item details - name: '{existing_name}', qty: {existing_qty}, unit: {existing_unit}")
             
             if quantity is None:
                 # Remove item completely
+                logger.info(f"Attempting to delete item completely: '{existing_name}'")
                 self.db_helper.delete_item(existing_name)
-                logger.info(f"Removed item: {existing_name}")
+                logger.info(f"✅ Successfully removed item: {existing_name}")
                 return {"name": existing_name, "quantity": 0, "unit": existing_unit, "removed": True}
             
             # Convert removal quantity to existing unit if units are different
