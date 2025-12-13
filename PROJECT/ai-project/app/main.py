@@ -13,6 +13,9 @@ import os
 from dotenv import load_dotenv
 import logging
 
+# Import Opik for endpoint tracing
+from opik import track
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -25,7 +28,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 # Import LangGraph components
 try:
-    from .graph.workflow import create_shopping_assistant_graph
+    from .graph.workflow import create_shopping_assistant_graph, create_opik_tracer
     from .graph.state import ShoppingAssistantState
     LANGGRAPH_AVAILABLE = True
 except ImportError as e:
@@ -127,6 +130,7 @@ async def get_inventory(
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/inventory/add")
+@track(name="add_inventory_api")
 async def add_inventory(
     item: InventoryUpdate,
     current_user: models.User = Depends(get_current_user),
@@ -190,6 +194,7 @@ async def add_inventory(
         raise HTTPException(status_code=500, detail=f"Error adding item: {str(e)}")
 
 @app.post("/api/inventory/remove")
+@track(name="remove_inventory_api")
 async def remove_inventory(
     item: InventoryRemove,
     current_user: models.User = Depends(get_current_user),
@@ -316,6 +321,7 @@ class ParseIngredientResponse(BaseModel):
     item_name: str
 
 @app.post("/api/inventory/parse", response_model=ParseIngredientResponse)
+@track(name="parse_ingredient_api")
 async def parse_ingredient_text(
     request: ParseIngredientRequest,
     current_user: models.User = Depends(get_current_user)
@@ -327,10 +333,28 @@ async def parse_ingredient_text(
     try:
         from .llm.llm_client import LLMClient
         
+        logger.info(f"Parsing ingredient text: '{request.text}'")
+        
         llm_client = LLMClient()
         parsed = llm_client.parse_ingredient_text(request.text)
         
         logger.info(f"Parsed ingredient '{request.text}' -> {parsed}")
+        
+        # Update current trace with input/output metadata
+        try:
+            from opik import opik_context
+            opik_context.update_current_trace(
+                input={"text": request.text},
+                output=parsed,
+                metadata={
+                    "user_id": current_user.id,
+                    "operation": "ingredient_parsing",
+                    "llm_model": "gpt-4o-mini"
+                },
+                tags=["ingredient-parse", "llm-call", "voice-input"]
+            )
+        except Exception as e:
+            logger.warning(f"Could not update trace metadata: {e}")
         
         return ParseIngredientResponse(
             quantity=parsed["quantity"],
@@ -353,6 +377,7 @@ async def health():
     return {"status": "healthy", "version": "2.0.0", "orchestration": "langgraph" if LANGGRAPH_AVAILABLE else "direct"}
 
 @app.post("/api/meal-plan/generate")
+@track(name="generate_meal_plan_api")
 async def generate_meal_plan(
     request: MealPlanRequest,
     current_user: models.User = Depends(get_current_user),
@@ -392,6 +417,9 @@ async def generate_meal_plan(
             try:
                 graph_app = create_shopping_assistant_graph(db_helper)
                 
+                # Create OpikTracer for this invocation
+                opik_tracer = create_opik_tracer(graph_app)
+                
                 # Build preferences string - keep user's exact request
                 # DO NOT modify or wrap the user's preferences
                 preferences_str = request.preferences or ""
@@ -429,7 +457,9 @@ async def generate_meal_plan(
                     "thresholds": {}
                 }
                 
-                result = graph_app.invoke(initial_state)
+                # Pass OpikTracer as callback to LangGraph
+                config = {"callbacks": [opik_tracer]} if opik_tracer else {}
+                result = graph_app.invoke(initial_state, config=config)
                 logger.info(f"Meal plan generated: success={result.get('success')}, error={result.get('error')}")
                 
                 if result.get("error"):
@@ -525,6 +555,7 @@ async def get_shopping_list(
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/shopping-list/add")
+@track(name="add_shopping_list_item_api")
 async def add_shopping_list_item(
     item: ShoppingListItemUpdate,
     current_user: models.User = Depends(get_current_user),
@@ -575,6 +606,7 @@ async def delete_shopping_list_item(
 
 # Confirm meal plan endpoint
 @app.post("/api/meal-plan/confirm")
+@track(name="confirm_meal_plan_api")
 async def confirm_meal_plan(
     request: ConfirmMealPlanRequest,
     current_user: models.User = Depends(get_current_user),
@@ -595,6 +627,8 @@ async def confirm_meal_plan(
         items_added_to_shopping_list = []
         items_reduced_from_inventory = []
         items_deleted_from_inventory = []
+        
+        logger.info(f"Confirming meal plan with {len(request.ingredients)} ingredients")
         
         for ingredient in request.ingredients:
             ingredient_name = ingredient.get('name', '').strip()
@@ -772,6 +806,27 @@ async def confirm_meal_plan(
                     })
                 except Exception as e:
                     logger.warning(f"Could not add {ingredient_name} to shopping list: {str(e)}")
+        
+        # Log summary for tracing
+        logger.info(f"Meal plan confirmation complete: "
+                   f"{len(items_added_to_shopping_list)} items added to shopping list, "
+                   f"{len(items_reduced_from_inventory)} items reduced, "
+                   f"{len(items_deleted_from_inventory)} items deleted from inventory")
+        
+        # Update current trace with detailed results
+        try:
+            from opik import opik_context
+            opik_context.update_current_trace(
+                metadata={
+                    "total_ingredients_processed": len(request.ingredients),
+                    "shopping_list_additions": len(items_added_to_shopping_list),
+                    "inventory_reductions": len(items_reduced_from_inventory),
+                    "inventory_deletions": len(items_deleted_from_inventory)
+                },
+                tags=["meal-plan-confirm", "inventory-update", "shopping-list-update"]
+            )
+        except Exception as e:
+            logger.warning(f"Could not update trace metadata: {e}")
         
         return {
             "message": "Meal plan confirmed",

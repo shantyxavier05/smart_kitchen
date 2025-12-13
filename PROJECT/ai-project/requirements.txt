@@ -7,4 +7,5 @@ PyJWT
 pydantic
 pydantic[email]
 python-multipart
+opik
 

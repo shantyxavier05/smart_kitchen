@@ -6,6 +6,9 @@ from typing import Literal, Any
 
 from langgraph.graph import StateGraph, END
 
+# Import Opik for LangGraph tracing
+from opik.integrations.langchain import OpikTracer
+
 from app.graph.state import ShoppingAssistantState
 from app.graph.nodes.voice_router import voice_router_node
 from app.graph.nodes.inventory_node import inventory_node
@@ -184,6 +187,31 @@ def create_shopping_assistant_graph(db_helper: DatabaseHelper) -> Any:
     
     logger.info("LangGraph workflow compiled successfully")
     return app
+
+
+def create_opik_tracer(app) -> OpikTracer:
+    """
+    Creates an OpikTracer for LangGraph with graph visualization.
+    
+    Args:
+        app: Compiled LangGraph application
+        
+    Returns:
+        OpikTracer instance configured for the graph, or None if creation fails
+    """
+    try:
+        from app.config import OPIK_PROJECT_NAME
+        
+        opik_tracer = OpikTracer(
+            project_name=OPIK_PROJECT_NAME,
+            graph=app.get_graph(xray=True),
+            tags=["langgraph", "shopping-assistant"]
+        )
+        logger.info("OpikTracer created successfully")
+        return opik_tracer
+    except Exception as e:
+        logger.warning(f"Failed to create OpikTracer: {e}. Tracing will be disabled.")
+        return None
 
 
 

@@ -6,6 +6,10 @@ import logging
 import json
 from typing import Dict, Optional
 
+# Import Opik for OpenAI tracking
+from opik.integrations.openai import track_openai
+from opik import track
+
 logger = logging.getLogger(__name__)
 
 
@@ -25,6 +29,7 @@ class LLMClient:
         else:
             logger.info("Using OpenAI API for recipe generation")
     
+    @track(name="llm_generate_recipe")
     def generate_recipe(self, prompt: str) -> Dict:
         """
         Generate a recipe using LLM
@@ -41,6 +46,7 @@ class LLMClient:
         else:
             return self._openai_generate_recipe(prompt)
     
+    @track(name="llm_parse_ingredient")
     def parse_ingredient_text(self, text: str) -> Dict:
         """
         Parse natural language ingredient text into structured data
@@ -63,6 +69,8 @@ class LLMClient:
             from openai import OpenAI
             
             client = OpenAI(api_key=self.api_key)
+            # Wrap client with Opik tracking
+            client = track_openai(client, project_name="smart-kitchen-assistant")
             
             response = client.chat.completions.create(
                 model="gpt-4o-mini",  # Using GPT-4o-mini for better quality and lower cost
@@ -178,6 +186,8 @@ class LLMClient:
             from openai import OpenAI
             
             client = OpenAI(api_key=self.api_key)
+            # Wrap client with Opik tracking
+            client = track_openai(client, project_name="smart-kitchen-assistant")
             
             prompt = f"""Parse the following ingredient text and extract the quantity, unit, and item name.
 Return ONLY a valid JSON object with these exact keys: "quantity", "unit", "item_name".
@@ -203,6 +213,8 @@ Now parse this:
 Input: "{text}"
 Output:"""
 
+            logger.info(f"Sending to OpenAI: '{text}'")
+            
             response = client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=[
