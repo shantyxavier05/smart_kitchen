@@ -255,3 +255,4 @@ OPIK_PROJECT_NAME=smart-kitchen
 
 **Next Steps:** Follow the action plan above to make it OPIK-ready in 1-2 hours.
 
+
