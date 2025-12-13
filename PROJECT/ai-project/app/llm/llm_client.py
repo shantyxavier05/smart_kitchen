@@ -17,21 +17,13 @@ try:
     if OPIK_ENABLED and OPIK_API_KEY:
         try:
             import opik
-            # OPIK configure only accepts api_key and workspace
             opik.configure(
                 api_key=OPIK_API_KEY,
-                workspace=OPIK_WORKSPACE
+                workspace=OPIK_WORKSPACE,
+                project=OPIK_PROJECT_NAME
             )
-            # Enable OpenAI integration for automatic tracing
-            # Just importing the module enables automatic tracing of OpenAI SDK calls
-            try:
-                import opik.integrations.openai as opik_openai
-                # The import itself enables automatic tracing
-                logger.info("OPIK OpenAI integration enabled - automatic tracing active")
-            except ImportError:
-                logger.debug("OPIK OpenAI integration not available")
             OPIK_AVAILABLE = True
-            logger.info(f"OPIK configured successfully for project: {OPIK_PROJECT_NAME}")
+            logger.info("OPIK configured successfully")
         except Exception as e:
             logger.warning(f"OPIK configuration failed: {e}")
             OPIK_AVAILABLE = False
@@ -45,8 +37,8 @@ except ImportError:
 try:
     from app.guardrails import validate_prompt, validate_llm_response, sanitize_prompt, get_ethical_response_for_illegal_item
     GUARDRAILS_AVAILABLE = True
-except ImportError as e:
-    logger.warning(f"Guardrails module not available: {e}")
+except ImportError:
+    logger.warning("Guardrails module not available")
     GUARDRAILS_AVAILABLE = False
 
 
@@ -86,10 +78,8 @@ class LLMClient:
             is_valid, error_msg = validate_prompt(sanitized_prompt, context="recipe")
             if not is_valid:
                 logger.warning(f"Guardrails blocked prompt: {error_msg}")
-                logger.debug(f"Blocked prompt (first 500 chars): {sanitized_prompt[:500]}")
                 # Handle illegal food items ethically
                 if error_msg == "ILLEGAL_FOOD_ITEM":
-                    from app.guardrails import get_ethical_response_for_illegal_item
                     return get_ethical_response_for_illegal_item()
                 return {
                     "name": "Request Cannot Be Processed",
@@ -100,19 +90,13 @@ class LLMClient:
                 }
             prompt = sanitized_prompt
         
-        # OPIK tracing - wrap the entire recipe generation
+        # OPIK tracing
         if OPIK_AVAILABLE:
             import opik
-            try:
-                # Use start_as_current_trace context manager
-                # OPIK will automatically trace OpenAI SDK calls when configured
-                # Set flush=True to ensure traces are sent immediately
-                with opik.start_as_current_trace(
-                    name="recipe_generation",
-                    input={"prompt": prompt},
-                    metadata={"model": "gpt-4o-mini"},
-                    flush=True
-                ):
+            with opik.trace("recipe_generation", metadata={"model": "gpt-4o-mini"}):
+                opik.log_input("prompt", prompt)
+                
+                try:
                     if self.use_mock:
                         logger.warning("MOCK LLM: Recipe generation would use OpenAI API")
                         result = self._mock_generate_recipe(prompt)
@@ -126,7 +110,6 @@ class LLMClient:
                             logger.warning(f"Guardrails blocked response: {error_msg}")
                             # Handle illegal food items ethically
                             if error_msg == "ILLEGAL_FOOD_ITEM":
-                                from app.guardrails import get_ethical_response_for_illegal_item
                                 result = get_ethical_response_for_illegal_item()
                             else:
                                 result = {
@@ -137,13 +120,12 @@ class LLMClient:
                                     "instructions": ["I don't have access to recipes or information about restricted or illegal food items. Please try a different recipe request."]
                                 }
                     
-                    # Trace automatically ends when exiting 'with' block
-                    # OPIK will automatically capture OpenAI SDK calls and output
+                    opik.log_output("recipe", result)
                     return result
-            except Exception as e:
-                logger.error(f"Error in OPIK tracing: {e}")
-                # Fall through to non-OPIK path if tracing fails
-                pass
+                except Exception as e:
+                    logger.error(f"Error in recipe generation: {e}")
+                    opik.log_error(str(e))
+                    raise
         else:
             # No OPIK - proceed normally but still apply guardrails
             if self.use_mock:
@@ -159,7 +141,6 @@ class LLMClient:
                     logger.warning(f"Guardrails blocked response: {error_msg}")
                     # Handle illegal food items ethically
                     if error_msg == "ILLEGAL_FOOD_ITEM":
-                        from app.guardrails import get_ethical_response_for_illegal_item
                         return get_ethical_response_for_illegal_item()
                     return {
                         "name": "Response Cannot Be Displayed",
@@ -211,10 +192,6 @@ class LLMClient:
             try:
                 recipe = json.loads(content)
                 logger.info(f"Successfully generated recipe: {recipe.get('name', 'Unknown')}")
-                
-                # OPIK automatically traces OpenAI SDK calls when configured
-                # Token usage is captured automatically by OPIK's OpenAI integration
-                
                 return recipe
             except json.JSONDecodeError as e:
                 logger.error(f"Failed to parse JSON from LLM response: {e}")
@@ -306,29 +283,7 @@ class LLMClient:
         }
     
     def _openai_parse_ingredient(self, text: str) -> Dict:
-        """Parse ingredient text using OpenAI API with OPIK tracing"""
-        # OPIK: Trace ingredient parsing
-        if OPIK_AVAILABLE:
-            import opik
-            with opik.start_as_current_trace(
-                name="ingredient_parsing",
-                input={"ingredient_text": text},
-                metadata={"model": "gpt-4o-mini"},
-                flush=True
-            ):
-                try:
-                    result = self._openai_parse_ingredient_internal(text)
-                    # Trace automatically ends when exiting 'with' block
-                    # OPIK will automatically capture OpenAI SDK calls and output
-                    return result
-                except Exception as e:
-                    # Trace will capture the exception automatically
-                    raise
-        else:
-            return self._openai_parse_ingredient_internal(text)
-    
-    def _openai_parse_ingredient_internal(self, text: str) -> Dict:
-        """Internal method for ingredient parsing (called with or without OPIK)"""
+        """Parse ingredient text using OpenAI API"""
         try:
             from openai import OpenAI
             
@@ -412,9 +367,6 @@ Output:"""
             
             unit_lower = parsed['unit'].lower()
             parsed['unit'] = unit_map.get(unit_lower, parsed['unit'])
-            
-            # OPIK automatically captures token usage from OpenAI SDK calls
-            # No manual logging needed - OPIK hooks into OpenAI automatically
             
             return parsed
             
