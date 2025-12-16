@@ -214,7 +214,7 @@ Input: "{text}"
 Output:"""
 
             logger.info(f"Sending to OpenAI: '{text}'")
-            
+
             response = client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=[

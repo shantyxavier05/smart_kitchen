@@ -413,6 +413,42 @@ async def generate_meal_plan(
         
         db_helper = DatabaseHelper(db, current_user.id)
         
+        # Get current inventory to add to trace
+        inventory = db_helper.get_all_inventory()
+        logger.info(f"User has {len(inventory)} items in inventory")
+        
+        # Prepare inventory summary for tracing
+        inventory_summary = [
+            {
+                "name": item['name'],
+                "quantity": item['quantity'],
+                "unit": item['unit']
+            }
+            for item in inventory
+        ]
+        
+        # Update trace with request details and inventory
+        try:
+            from opik import opik_context
+            # Set the full input including inventory
+            opik_context.update_current_trace(
+                input={
+                    "preferences": request.preferences,
+                    "servings": request.servings,
+                    "cuisine": request.cuisine,
+                    "inventory_usage": request.inventory_usage,
+                    "inventory_items": inventory_summary
+                },
+                metadata={
+                    "user_id": current_user.id,
+                    "inventory_count": len(inventory)
+                },
+                tags=["meal-plan", "recipe-generation"]
+            )
+            logger.info(f"Updated trace with {len(inventory)} inventory items")
+        except Exception as e:
+            logger.warning(f"Could not update trace metadata: {e}")
+        
         if LANGGRAPH_AVAILABLE:
             try:
                 graph_app = create_shopping_assistant_graph(db_helper)

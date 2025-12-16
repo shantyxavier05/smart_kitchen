@@ -6,6 +6,7 @@ from typing import Dict, List, Optional
 
 from app.database_helper import DatabaseHelper
 from app.llm.llm_client import LLMClient
+from opik import track
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +19,7 @@ class PlannerAgent:
         self.recipe_cache: Dict[str, Dict] = {}
         self.llm_client = LLMClient()  # Initialize LLM client
     
+    @track(name="planner_suggest_recipe")
     def suggest_recipe(self, preferences: Optional[str] = None, servings: int = 4, inventory_usage: str = "strict") -> Dict:
         """
         Suggest a recipe based on available ingredients using LLM
@@ -48,6 +50,26 @@ class PlannerAgent:
             
             # Log inventory details for debugging
             logger.info(f"Inventory items: {[item['name'] for item in inventory]}")
+            
+            # Update trace with inventory information
+            try:
+                from opik import opik_context
+                inventory_summary = [
+                    f"{item['name']}: {item['quantity']} {item['unit']}" 
+                    for item in inventory
+                ]
+                opik_context.update_current_span(
+                    metadata={
+                        "inventory_count": len(inventory),
+                        "inventory_items": inventory_summary,
+                        "preferences": preferences or "None",
+                        "servings": servings,
+                        "inventory_usage": inventory_usage
+                    },
+                    tags=["recipe-generation", "inventory-based"]
+                )
+            except Exception as e:
+                logger.warning(f"Could not update span metadata: {e}")
             
             # Build prompt for LLM
             prompt = self._build_recipe_prompt(inventory, preferences, servings, inventory_usage)

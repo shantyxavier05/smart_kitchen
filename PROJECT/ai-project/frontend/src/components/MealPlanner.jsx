@@ -772,65 +772,65 @@ function MealPlanner() {
                     {/* Show button only if not confirmed */}
                     {!isConfirmed ? (
                       <>
-                        <button
-                          onClick={handleConfirmMeal}
-                          disabled={confirming}
-                          style={{
-                            padding: '8px 16px',
-                            backgroundColor: '#16a34a',
-                            color: 'white',
-                            border: 'none',
-                            borderRadius: '6px',
-                            fontSize: '0.875rem',
-                            fontWeight: '600',
-                            cursor: confirming ? 'not-allowed' : 'pointer',
-                            opacity: confirming ? 0.7 : 1,
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            gap: '6px',
-                            transition: 'all 0.2s ease'
-                          }}
-                          onMouseEnter={(e) => {
-                            if (!confirming) {
-                              e.target.style.backgroundColor = '#15803d'
-                            }
-                          }}
-                          onMouseLeave={(e) => {
-                            if (!confirming) {
-                              e.target.style.backgroundColor = '#16a34a'
-                            }
-                          }}
-                        >
-                          {confirming ? (
-                            <>
-                              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16" style={{ animation: 'spin 1s linear infinite' }}>
-                                <circle cx="12" cy="12" r="10" strokeDasharray="32" strokeDashoffset="32">
-                                  <animate attributeName="stroke-dasharray" dur="2s" values="0 32;16 16;0 32;0 32" repeatCount="indefinite"/>
-                                  <animate attributeName="stroke-dashoffset" dur="2s" values="0;-16;-32;-32" repeatCount="indefinite"/>
-                                </circle>
-                              </svg>
-                              Confirming...
-                            </>
-                          ) : (
-                            <>
-                              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16">
-                                <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
-                                <polyline points="22 4 12 14.01 9 11.01"/>
-                              </svg>
-                              Confirm Meal Plan
-                            </>
-                          )}
-                        </button>
-                        <p style={{
-                          marginTop: '12px',
-                          fontSize: '0.875rem',
-                          color: '#6b7280',
-                          textAlign: 'center',
-                          lineHeight: '1.5'
-                        }}>
-                          This will update your inventory and add missing items to your shopping list.
-                        </p>
+                    <button
+                      onClick={handleConfirmMeal}
+                      disabled={confirming}
+                      style={{
+                        padding: '8px 16px',
+                        backgroundColor: '#16a34a',
+                        color: 'white',
+                        border: 'none',
+                        borderRadius: '6px',
+                        fontSize: '0.875rem',
+                        fontWeight: '600',
+                        cursor: confirming ? 'not-allowed' : 'pointer',
+                        opacity: confirming ? 0.7 : 1,
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '6px',
+                        transition: 'all 0.2s ease'
+                      }}
+                      onMouseEnter={(e) => {
+                        if (!confirming) {
+                          e.target.style.backgroundColor = '#15803d'
+                        }
+                      }}
+                      onMouseLeave={(e) => {
+                        if (!confirming) {
+                          e.target.style.backgroundColor = '#16a34a'
+                        }
+                      }}
+                    >
+                      {confirming ? (
+                        <>
+                          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16" style={{ animation: 'spin 1s linear infinite' }}>
+                            <circle cx="12" cy="12" r="10" strokeDasharray="32" strokeDashoffset="32">
+                              <animate attributeName="stroke-dasharray" dur="2s" values="0 32;16 16;0 32;0 32" repeatCount="indefinite"/>
+                              <animate attributeName="stroke-dashoffset" dur="2s" values="0;-16;-32;-32" repeatCount="indefinite"/>
+                            </circle>
+                          </svg>
+                          Confirming...
+                        </>
+                      ) : (
+                        <>
+                          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16">
+                            <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+                            <polyline points="22 4 12 14.01 9 11.01"/>
+                          </svg>
+                          Confirm Meal Plan
+                        </>
+                      )}
+                    </button>
+                    <p style={{
+                      marginTop: '12px',
+                      fontSize: '0.875rem',
+                      color: '#6b7280',
+                      textAlign: 'center',
+                      lineHeight: '1.5'
+                    }}>
+                      This will update your inventory and add missing items to your shopping list.
+                    </p>
                       </>
                     ) : (
                       <div style={{
