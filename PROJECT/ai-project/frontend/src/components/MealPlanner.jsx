@@ -17,11 +17,15 @@ function MealPlanner() {
   const [confirming, setConfirming] = useState(false)
   const [confirmSuccess, setConfirmSuccess] = useState(null)
   const [confirmError, setConfirmError] = useState(null)
+  const [isConfirmed, setIsConfirmed] = useState(false)
 
   const handleGenerate = async () => {
     setLoading(true)
     setError(null)
     setMealPlan(null)
+    setIsConfirmed(false)  // Reset confirmation state
+    setConfirmSuccess(null)
+    setConfirmError(null)
 
     const token = localStorage.getItem('token')
     if (!token) {
@@ -240,6 +244,7 @@ function MealPlanner() {
         }
         
         setConfirmSuccess(successMessage)
+        setIsConfirmed(true)  // Mark as confirmed
         setTimeout(() => setConfirmSuccess(null), 5000)
       } else {
         setConfirmError(data.detail || data.message || 'Failed to confirm meal plan')
@@ -763,6 +768,10 @@ function MealPlanner() {
                         </div>
                       </div>
                     )}
+                    
+                    {/* Show button only if not confirmed */}
+                    {!isConfirmed ? (
+                      <>
                     <button
                       onClick={handleConfirmMeal}
                       disabled={confirming}
@@ -822,6 +831,30 @@ function MealPlanner() {
                     }}>
                       This will update your inventory and add missing items to your shopping list.
                     </p>
+                      </>
+                    ) : (
+                      <div style={{
+                        padding: '16px 20px',
+                        backgroundColor: '#f0fdf4',
+                        color: '#166534',
+                        borderRadius: '8px',
+                        border: '1px solid #bbf7d0',
+                        display: 'flex',
+                        gap: '12px',
+                        alignItems: 'center'
+                      }}>
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0 }}>
+                          <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+                          <polyline points="22 4 12 14.01 9 11.01"/>
+                        </svg>
+                        <div style={{ flex: 1 }}>
+                          <strong style={{ display: 'block', marginBottom: '4px' }}>Meal Plan Confirmed</strong>
+                          <p style={{ margin: 0, lineHeight: '1.6', fontSize: '0.875rem' }}>
+                            Your inventory and shopping list have been updated. Generate a new meal plan to continue.
+                          </p>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

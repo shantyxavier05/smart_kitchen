@@ -31,3 +31,8 @@ DATABASE_URL = os.getenv(
 # OpenAI API Configuration
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", None)
 USE_MOCK_LLM = os.getenv("USE_MOCK_LLM", "false").lower() == "true"  # Default to false - use LLM by default
+
+# Opik Configuration
+OPIK_API_KEY = os.getenv("OPIK_API_KEY", None)
+OPIK_PROJECT_NAME = os.getenv("OPIK_PROJECT_NAME", "smart-kitchen-assistant")
+OPIK_WORKSPACE = os.getenv("OPIK_WORKSPACE", "default")
