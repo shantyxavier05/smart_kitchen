@@ -4,7 +4,7 @@ Supports OpenAI API or mock implementation
 """
 import logging
 import json
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 # Import Opik for OpenAI tracking
 from opik.integrations.openai import track_openai
@@ -62,6 +62,24 @@ class LLMClient:
             return self._mock_parse_ingredient(text)
         else:
             return self._openai_parse_ingredient(text)
+    
+    @track(name="llm_parse_meal_plan_ingredients")
+    def parse_meal_plan_ingredients(self, ingredients: List[Dict]) -> List[Dict]:
+        """
+        Parse meal plan ingredients using LLM to expand generic items into specific ones.
+        For example, "vegetables (tomato or potato)" becomes separate "tomato" and "potato" items.
+        
+        Args:
+            ingredients: List of ingredient dictionaries with name, quantity, unit
+            
+        Returns:
+            List of parsed ingredient dictionaries with specific item names
+        """
+        if self.use_mock:
+            logger.warning("MOCK LLM: Using basic parsing fallback for meal plan ingredients")
+            return self._mock_parse_meal_plan_ingredients(ingredients)
+        else:
+            return self._openai_parse_meal_plan_ingredients(ingredients)
     
     def _openai_generate_recipe(self, prompt: str) -> Dict:
         """Generate recipe using OpenAI API"""
@@ -336,4 +354,177 @@ Output:"""
             "unit": "units",
             "item_name": normalized
         }
+    
+    def _openai_parse_meal_plan_ingredients(self, ingredients: List[Dict]) -> List[Dict]:
+        """Parse meal plan ingredients using OpenAI API to expand generic items into specific ones"""
+        try:
+            from openai import OpenAI
+            
+            client = OpenAI(api_key=self.api_key)
+            client = track_openai(client, project_name="smart-kitchen-assistant")
+            
+            # Format ingredients for the prompt
+            ingredients_text = "\n".join([
+                f"- {ing.get('name', '')}: {ing.get('quantity', 0)} {ing.get('unit', 'units')}"
+                for ing in ingredients
+            ])
+            
+            prompt = f"""Parse the following meal plan ingredients and expand any generic or ambiguous items into specific, individual items.
+
+CRITICAL RULES:
+1. If an ingredient is generic (e.g., "vegetables (tomato or potato)"), split it into separate specific items (e.g., "tomato" and "potato")
+2. If an ingredient contains alternatives (e.g., "tomato or potato"), create separate items for each alternative
+3. If an ingredient is already specific (e.g., "2 kg tomatoes"), keep it as is
+4. Preserve quantities and units when splitting - distribute the quantity evenly among alternatives, or use the same quantity for each
+5. Remove parenthetical notes, alternatives, and generic descriptions
+6. Return ONLY specific, individual ingredient items
+
+Input ingredients:
+{ingredients_text}
+
+Return a JSON object with an "ingredients" array. Each ingredient should have:
+- "name": specific item name (e.g., "tomato", "potato", NOT "vegetables (tomato or potato)")
+- "quantity": number (preserve original or distribute if splitting)
+- "unit": unit of measurement
+
+Example:
+Input: [{{"name": "vegetables (tomato or potato)", "quantity": 2, "unit": "kg"}}]
+Output: {{"ingredients": [{{"name": "tomato", "quantity": 2, "unit": "kg"}}, {{"name": "potato", "quantity": 2, "unit": "kg"}}]}}
+
+Example:
+Input: [{{"name": "2 kg tomatoes", "quantity": 2, "unit": "kg"}}]
+Output: {{"ingredients": [{{"name": "tomatoes", "quantity": 2, "unit": "kg"}}]}}
+
+Now parse these ingredients:
+{ingredients_text}
+
+Return ONLY a valid JSON object with an "ingredients" array, no additional text."""
+
+            logger.info(f"Parsing {len(ingredients)} meal plan ingredients with LLM")
+
+            response = client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "You are a precise ingredient parser. Always return valid JSON objects only, no additional text or markdown."
+                    },
+                    {
+                        "role": "user",
+                        "content": prompt
+                    }
+                ],
+                temperature=0.1,
+                max_tokens=2000,
+                response_format={"type": "json_object"}
+            )
+            
+            content = response.choices[0].message.content.strip()
+            logger.info(f"LLM parse response: {content[:200]}...")
+            
+            # Remove markdown code blocks if present
+            if content.startswith("```"):
+                content = content.split("```")[1]
+                if content.startswith("json"):
+                    content = content[4:]
+                content = content.strip()
+            
+            # Parse JSON response
+            parsed_data = json.loads(content)
+            
+            # Handle different response formats
+            if isinstance(parsed_data, list):
+                parsed_ingredients = parsed_data
+            elif isinstance(parsed_data, dict) and "ingredients" in parsed_data:
+                parsed_ingredients = parsed_data["ingredients"]
+            elif isinstance(parsed_data, dict):
+                # If it's a dict with numeric keys, convert to list
+                parsed_ingredients = list(parsed_data.values())
+            else:
+                raise ValueError("Unexpected response format from LLM")
+            
+            # Validate structure
+            validated_ingredients = []
+            for ing in parsed_ingredients:
+                if isinstance(ing, dict) and "name" in ing:
+                    validated_ingredients.append({
+                        "name": str(ing["name"]).strip(),
+                        "quantity": float(ing.get("quantity", 1)),
+                        "unit": str(ing.get("unit", "units")).strip()
+                    })
+            
+            logger.info(f"Parsed {len(validated_ingredients)} specific ingredients from {len(ingredients)} original items")
+            return validated_ingredients
+            
+        except Exception as e:
+            logger.error(f"Error parsing meal plan ingredients with OpenAI: {str(e)}")
+            # Fallback to mock parsing
+            return self._mock_parse_meal_plan_ingredients(ingredients)
+    
+    def _mock_parse_meal_plan_ingredients(self, ingredients: List[Dict]) -> List[Dict]:
+        """Fallback parsing for meal plan ingredients using basic string processing"""
+        logger.warning("MOCK LLM: Using basic parsing fallback for meal plan ingredients")
+        
+        parsed_ingredients = []
+        
+        for ing in ingredients:
+            name = ing.get('name', '').strip()
+            quantity = ing.get('quantity', 1)
+            unit = ing.get('unit', 'units')
+            
+            # Try to extract specific items from generic descriptions
+            # Pattern: "vegetables (tomato or potato)" -> ["tomato", "potato"]
+            import re
+            
+            # Check for alternatives in parentheses: (item1 or item2)
+            alt_match = re.search(r'\(([^)]+)\)', name)
+            if alt_match:
+                alternatives_text = alt_match.group(1)
+                # Split by "or", "and", ","
+                alternatives = re.split(r'\s+or\s+|\s+and\s+|,\s*', alternatives_text)
+                alternatives = [alt.strip() for alt in alternatives if alt.strip()]
+                
+                if alternatives:
+                    # Remove the parenthetical part from the base name
+                    base_name = re.sub(r'\s*\([^)]+\)', '', name).strip()
+                    # If base_name is generic (like "vegetables"), use alternatives directly
+                    if base_name.lower() in ['vegetables', 'vegetable', 'items', 'ingredients']:
+                        for alt in alternatives:
+                            parsed_ingredients.append({
+                                "name": alt.strip(),
+                                "quantity": float(quantity),
+                                "unit": unit
+                            })
+                    else:
+                        # Use base name + each alternative
+                        for alt in alternatives:
+                            parsed_ingredients.append({
+                                "name": f"{base_name} {alt}".strip(),
+                                "quantity": float(quantity),
+                                "unit": unit
+                            })
+                    continue
+            
+            # Check for "or" in the name itself
+            if ' or ' in name.lower():
+                parts = re.split(r'\s+or\s+', name, flags=re.IGNORECASE)
+                for part in parts:
+                    part = part.strip()
+                    if part:
+                        parsed_ingredients.append({
+                            "name": part,
+                            "quantity": float(quantity),
+                            "unit": unit
+                        })
+                continue
+            
+            # If no alternatives found, use the ingredient as-is
+            parsed_ingredients.append({
+                "name": name,
+                "quantity": float(quantity),
+                "unit": unit
+            })
+        
+        logger.info(f"Mock parsed {len(parsed_ingredients)} ingredients from {len(ingredients)} original items")
+        return parsed_ingredients
 

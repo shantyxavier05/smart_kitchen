@@ -114,6 +114,47 @@ if cursor.fetchone():
     
     print('='*70 + '\n')
 
+# Check if shopping_list table exists
+cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='shopping_list'")
+if cursor.fetchone():
+    print('='*70)
+    print('🛒 SHOPPING LIST TABLE'.center(70))
+    print('='*70 + '\n')
+
+    cursor.execute('''
+        SELECT s.id, s.name, s.quantity, s.checked, s.user_id, u.username, u.email, s.created_at, s.updated_at
+        FROM shopping_list s
+        LEFT JOIN users u ON s.user_id = u.id
+        ORDER BY s.user_id, s.checked ASC, s.created_at DESC
+    ''')
+    items = cursor.fetchall()
+
+    if items:
+        current_user_id = None
+        for item in items:
+            if current_user_id != item[4]:
+                current_user_id = item[4]
+                print(f'\n👤 User: {item[5]} ({item[6]}) - ID: {item[4]}')
+                print('-'*70)
+            
+            checked_icon = '✅' if item[3] == 1 else '⬜'
+            print(f'  {checked_icon} Item ID:     {item[0]}')
+            print(f'  🏷️  Name:         {item[1]}')
+            print(f'  📊 Quantity:     {item[2]}')
+            print(f'  ✓  Checked:      {"Yes" if item[3] == 1 else "No"}')
+            print(f'  📅 Created:      {item[7]}')
+            print(f'  🔄 Updated:      {item[8]}')
+            print('-'*70)
+        
+        print(f'\n📈 Total Shopping List Items: {len(items)}')
+        checked_count = sum(1 for item in items if item[3] == 1)
+        unchecked_count = len(items) - checked_count
+        print(f'✅ Checked: {checked_count} | ⬜ Unchecked: {unchecked_count}')
+    else:
+        print('No shopping list items found in database.\n')
+    
+    print('='*70 + '\n')
+
 conn.close()
 print("\n✅ Database view complete!\n")
 
