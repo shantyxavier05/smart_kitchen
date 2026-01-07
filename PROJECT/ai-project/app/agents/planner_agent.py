@@ -2,6 +2,7 @@
 Planner Agent: Suggests recipes based on available ingredients using LLM
 """
 import logging
+import re
 from typing import Dict, List, Optional
 
 from app.database_helper import DatabaseHelper
@@ -20,7 +21,7 @@ class PlannerAgent:
         self.llm_client = LLMClient()  # Initialize LLM client
     
     @track(name="planner_suggest_recipe")
-    def suggest_recipe(self, preferences: Optional[str] = None, servings: int = 4, inventory_usage: str = "strict") -> Dict:
+    def suggest_recipe(self, preferences: Optional[str] = None, servings: int = 4, inventory_usage: str = "strict", allergies: Optional[List[str]] = None) -> Dict:
         """
         Suggest a recipe based on available ingredients using LLM
         
@@ -28,6 +29,7 @@ class PlannerAgent:
             preferences: Optional dietary preferences or restrictions (e.g., "Italian cuisine", "vegetarian")
             servings: Number of servings
             inventory_usage: How to use inventory - "strict" (only use inventory items) or "main" (use inventory as main ingredients)
+            allergies: Optional list of allergies to exclude from the recipe
             
         Returns:
             Dictionary containing recipe details
@@ -72,7 +74,7 @@ class PlannerAgent:
                 logger.warning(f"Could not update span metadata: {e}")
             
             # Build prompt for LLM
-            prompt = self._build_recipe_prompt(inventory, preferences, servings, inventory_usage)
+            prompt = self._build_recipe_prompt(inventory, preferences, servings, inventory_usage, allergies)
             logger.info(f"Built prompt for LLM (length: {len(prompt)} chars) with inventory_usage={inventory_usage}")
             logger.info(f"User preferences received: '{preferences}'")
             logger.info(f"Full prompt being sent to LLM:\n{prompt[:500]}...")  # Log first 500 chars
@@ -110,6 +112,10 @@ class PlannerAgent:
             
             # Ensure recipe has required fields
             recipe["servings"] = servings
+            
+            # Validate recipe doesn't contain allergens
+            if allergies and len(allergies) > 0:
+                recipe = self._validate_and_filter_allergens(recipe, allergies)
             
             # Cache the recipe for potential application
             self.recipe_cache[recipe.get("name", "Unknown Recipe")] = recipe
@@ -158,7 +164,7 @@ class PlannerAgent:
             "servings": servings
         }
     
-    def _build_recipe_prompt(self, inventory: List[Dict], preferences: Optional[str], servings: int, inventory_usage: str = "strict") -> str:
+    def _build_recipe_prompt(self, inventory: List[Dict], preferences: Optional[str], servings: int, inventory_usage: str = "strict", allergies: Optional[List[str]] = None) -> str:
         """Build a prompt for the LLM to generate a recipe"""
         
         # Safety check on preferences
@@ -234,6 +240,59 @@ EXAMPLE - User asks for "tea" with inventory containing butter, chilly powder:
 The goal is to create an AUTHENTIC, DELICIOUS recipe - not to randomly use inventory items!
 """.format(inventory_items=", ".join([item['name'] for item in inventory]))
         
+        # Build allergies exclusion section
+        allergies_section = ""
+        if allergies and len(allergies) > 0:
+            allergies_list = ", ".join(allergies)
+            
+            allergies_section = f"""
+🚨🚨🚨 CRITICAL - ALLERGY RESTRICTIONS - HIGHEST PRIORITY 🚨🚨🚨
+The user has the following allergies that MUST be completely excluded from the recipe:
+{allergies_list}
+
+⚠️⚠️⚠️ THIS IS A SAFETY CRITICAL REQUIREMENT - ALLERGIES CAN BE LIFE-THREATENING ⚠️⚠️⚠️
+
+ABSOLUTE REQUIREMENTS (NO EXCEPTIONS - APPLIES TO ALL RECIPES):
+1. DO NOT include ANY of these allergens in the recipe ingredients: {allergies_list}
+2. DO NOT use ingredients that contain these allergens or their variations
+3. DO NOT use ingredients that might contain traces of these allergens
+4. DO NOT suggest substitutes that might contain these allergens
+5. If the requested dish typically contains these allergens, you MUST create an allergy-safe alternative version
+6. Check ALL ingredients for potential allergen contamination (including oils, sauces, seasonings, and garnishes)
+7. Review the COMPLETE ingredient list BEFORE returning the recipe to ensure NO allergens are present
+
+GENERAL RULES FOR ANY ALLERGY:
+- If user is allergic to "X" → DO NOT use: X, X oil, X butter, X sauce, or any variation of X
+- If user is allergic to "X" → DO NOT use ingredients that commonly contain X
+- If user is allergic to "X" → Check all ingredients including: oils, sauces, seasonings, garnishes, toppings
+- If the requested dish traditionally uses X → Create an allergy-safe version without X
+- The recipe name can remain the same, but it MUST be X-free
+- Mention in the description that this is an allergy-safe version
+
+EXAMPLES (These principles apply to ANY allergy and ANY recipe):
+- If allergic to "Peanuts" → DO NOT use: peanuts, peanut oil, peanut butter, groundnuts, or any peanut-containing ingredient
+  → For ANY recipe (Pad Thai, Satay, etc.): Use safe alternatives or omit entirely
+- If allergic to "Shellfish" → DO NOT use: shrimp, prawns, crab, lobster, or any seafood
+  → For ANY recipe (Paella, Seafood Pasta, etc.): Use safe alternatives or omit entirely
+- If allergic to "Dairy" → DO NOT use: milk, cheese, butter, cream, yogurt, or any dairy product
+  → For ANY recipe (Mac and Cheese, Alfredo, etc.): Use dairy-free alternatives
+- If allergic to "Eggs" → DO NOT use: eggs, egg whites, egg yolks, or any egg-containing ingredient
+  → For ANY recipe (Cake, Omelet, etc.): Use egg-free alternatives
+- If allergic to "Gluten" → DO NOT use: wheat, barley, rye, or any gluten-containing ingredient
+  → For ANY recipe (Pasta, Bread, etc.): Use gluten-free alternatives
+- If allergic to "Soy" → DO NOT use: soy, soy sauce, tofu, or any soy-containing ingredient
+  → For ANY recipe: Use soy-free alternatives
+
+⚠️⚠️⚠️ SAFETY FIRST: Allergies can be life-threatening. NEVER include allergens in the recipe, even in small amounts, as "optional" ingredients, or as garnishes! ⚠️⚠️⚠️
+
+BEFORE RETURNING THE RECIPE, VERIFY:
+- None of the ingredients contain: {allergies_list}
+- None of the ingredients are variations or derivatives of: {allergies_list}
+- The recipe is completely safe for someone with these allergies
+- If the dish traditionally uses these allergens, you've created an allergy-safe alternative
+- The description mentions it's an allergy-safe version if applicable
+"""
+        
         prompt = f"""Generate a detailed recipe based on the following available ingredients and requirements.
 
 🚫 SAFETY WARNING - ABSOLUTE PROHIBITIONS:
@@ -247,6 +306,8 @@ You MUST NOT create recipes containing:
 - Any unethical, harmful, or inappropriate ingredients
 
 ONLY create recipes with legitimate, safe, edible food ingredients that are culturally appropriate and ethical.
+
+{allergies_section}
 
 Available ingredients in inventory:
 {inventory_text}
@@ -346,6 +407,90 @@ Respond with a JSON object in this exact format:
             ]
         
         return scaled_recipe
+    
+    def _validate_and_filter_allergens(self, recipe: Dict, allergies: List[str]) -> Dict:
+        """
+        Validate and filter out allergens from recipe ingredients.
+        Works for ANY allergy and ANY recipe by checking if ingredient names contain allergen names.
+        If allergens are found, remove them and add a warning to the description.
+        """
+        if not recipe.get("ingredients"):
+            return recipe
+        
+        # Create allergen keywords for matching - works for any allergy
+        allergen_keywords = []
+        for allergy in allergies:
+            allergy_lower = allergy.lower().strip()
+            # Add the base allergen name
+            allergen_keywords.append(allergy_lower)
+            
+            # Add common variations and derivatives for known allergens
+            # This makes the system work better for common allergies while still working for any allergy
+            if "peanut" in allergy_lower:
+                allergen_keywords.extend(["peanut", "peanuts", "groundnut", "groundnuts", "peanut oil", "peanut butter"])
+            elif "shellfish" in allergy_lower or "seafood" in allergy_lower:
+                allergen_keywords.extend(["shrimp", "prawn", "prawns", "crab", "crabs", "lobster", "lobsters", "seafood", "shellfish", "fish"])
+            elif "dairy" in allergy_lower or "milk" in allergy_lower:
+                allergen_keywords.extend(["milk", "cheese", "butter", "cream", "yogurt", "yoghurt", "dairy", "whey", "casein"])
+            elif "egg" in allergy_lower:
+                allergen_keywords.extend(["egg", "eggs", "egg white", "egg whites", "egg yolk", "egg yolks"])
+            elif "gluten" in allergy_lower or "wheat" in allergy_lower:
+                allergen_keywords.extend(["wheat", "barley", "rye", "gluten", "flour"])
+            elif "soy" in allergy_lower:
+                allergen_keywords.extend(["soy", "soya", "soybean", "soybeans", "tofu", "soy sauce"])
+            elif "tree nut" in allergy_lower or "nuts" in allergy_lower:
+                allergen_keywords.extend(["almond", "almonds", "walnut", "walnuts", "cashew", "cashews", "pistachio", "pistachios", "hazelnut", "hazelnuts", "pecan", "pecans", "macadamia", "macadamias"])
+            elif "sesame" in allergy_lower:
+                allergen_keywords.extend(["sesame", "sesame seed", "sesame seeds", "tahini"])
+            # For any other allergy, the base name will be checked
+        
+        # Filter ingredients - check if ingredient name contains any allergen
+        filtered_ingredients = []
+        removed_allergens = []
+        
+        for ingredient in recipe["ingredients"]:
+            ingredient_name = ingredient.get("name", "").lower()
+            contains_allergen = False
+            matched_allergen = None
+            
+            # Check if ingredient name contains any allergen keyword
+            for allergen in allergen_keywords:
+                # Use word boundary matching for better accuracy
+                # This prevents false positives (e.g., "butter" won't match "butterfly")
+                # Check if allergen appears as a whole word or as part of common phrases
+                pattern = r'\b' + re.escape(allergen) + r'\b'
+                if re.search(pattern, ingredient_name):
+                    contains_allergen = True
+                    matched_allergen = ingredient.get("name", "")
+                    removed_allergens.append(matched_allergen)
+                    logger.warning(f"Removed allergen '{matched_allergen}' from recipe due to user allergy: {allergies}")
+                    break
+                # Also check if allergen is a substring (for cases like "peanut oil")
+                elif allergen in ingredient_name:
+                    contains_allergen = True
+                    matched_allergen = ingredient.get("name", "")
+                    removed_allergens.append(matched_allergen)
+                    logger.warning(f"Removed allergen '{matched_allergen}' from recipe due to user allergy: {allergies}")
+                    break
+            
+            if not contains_allergen:
+                filtered_ingredients.append(ingredient)
+        
+        # Update recipe
+        recipe["ingredients"] = filtered_ingredients
+        
+        # Add warning to description if allergens were removed
+        if removed_allergens:
+            unique_removed = list(set(removed_allergens))
+            warning = f"⚠️ ALLERGY ALERT: This recipe has been automatically modified to exclude allergens ({', '.join(unique_removed)}). "
+            if "description" in recipe:
+                recipe["description"] = warning + recipe["description"]
+            else:
+                recipe["description"] = warning + "This is an allergy-safe version of the requested dish."
+            
+            logger.warning(f"Filtered {len(removed_allergens)} allergen-containing ingredients from recipe: {unique_removed}")
+        
+        return recipe
     
     def apply_recipe(self, recipe_name: str, servings: Optional[int] = None) -> Dict:
         """
