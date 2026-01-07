@@ -6,9 +6,7 @@ import logging
 import json
 from typing import Dict, List, Optional
 
-# Import Opik for OpenAI tracking
-from opik.integrations.openai import track_openai
-from opik import track
+# Note: Opik tracking removed - only generate_meal_plan_api is traced
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +27,6 @@ class LLMClient:
         else:
             logger.info("Using OpenAI API for recipe generation")
     
-    @track(name="llm_generate_recipe")
     def generate_recipe(self, prompt: str) -> Dict:
         """
         Generate a recipe using LLM
@@ -46,7 +43,6 @@ class LLMClient:
         else:
             return self._openai_generate_recipe(prompt)
     
-    @track(name="llm_parse_ingredient")
     def parse_ingredient_text(self, text: str) -> Dict:
         """
         Parse natural language ingredient text into structured data
@@ -63,7 +59,6 @@ class LLMClient:
         else:
             return self._openai_parse_ingredient(text)
     
-    @track(name="llm_parse_meal_plan_ingredients")
     def parse_meal_plan_ingredients(self, ingredients: List[Dict]) -> List[Dict]:
         """
         Parse meal plan ingredients using LLM to expand generic items into specific ones.
@@ -87,16 +82,83 @@ class LLMClient:
             from openai import OpenAI
             
             client = OpenAI(api_key=self.api_key)
-            # Wrap client with Opik tracking
-            client = track_openai(client, project_name="smart-kitchen-assistant")
+            
+            # Extract cuisine from prompt if present (for system prompt enhancement)
+            cuisine_mentioned = ""
+            import re
+            
+            # Try multiple patterns to find cuisine
+            cuisine_patterns = [
+                r'selected\s+"?([A-Za-z]+)"?\s+cuisine',
+                r'cuisine[:\s]+"?([A-Za-z]+)"?',
+                r'CUISINE TYPE[:\s]+"?([A-Za-z]+)"?',
+                r'CRITICAL CUISINE REQUIREMENT.*?"?([A-Za-z]+)"?\s+cuisine',
+            ]
+            
+            cuisine_name = None
+            for pattern in cuisine_patterns:
+                cuisine_match = re.search(pattern, prompt, re.IGNORECASE)
+                if cuisine_match:
+                    potential_cuisine = cuisine_match.group(1)
+                    # Validate it's a real cuisine name (not a common word)
+                    valid_cuisines = ['Italian', 'Indian', 'Chinese', 'Mexican', 'Thai', 'Japanese', 
+                                     'Mediterranean', 'American', 'French', 'Greek', 'Spanish', 'Korean',
+                                     'Vietnamese', 'Lebanese', 'Turkish', 'Brazilian', 'Moroccan', 'Ethiopian',
+                                     'German', 'British', 'Irish', 'Portuguese', 'Russian', 'Polish',
+                                     'Middle Eastern', 'Asian', 'European', 'African', 'Latin']
+                    # Case-insensitive match
+                    if any(c.lower() == potential_cuisine.lower() for c in valid_cuisines):
+                        cuisine_name = potential_cuisine.capitalize()
+                        logger.info(f"🌍 CUISINE DETECTED: {cuisine_name} - Will prioritize this in system prompt")
+                        break
+                    else:
+                        # If it's not in our list but pattern matched, still use it (might be a valid cuisine we don't know)
+                        # Only filter out obvious non-cuisine words
+                        non_cuisine_words = ['the', 'a', 'an', 'and', 'or', 'is', 'are', 'was', 'were', 'be', 'been']
+                        if potential_cuisine.lower() not in non_cuisine_words:
+                            cuisine_name = potential_cuisine.capitalize()
+                            logger.info(f"🌍 CUISINE DETECTED (unlisted): {cuisine_name} - Will prioritize this in system prompt")
+                            break
+            
+            if cuisine_name:
+                cuisine_mentioned = f"\n\n🌍🌍🌍 CRITICAL CUISINE REQUIREMENT - HIGHEST PRIORITY 🌍🌍🌍\nThe user has selected {cuisine_name} cuisine preference. The recipe MUST be authentic {cuisine_name} cuisine - this is the HIGHEST PRIORITY, even higher than inventory items.\n\nREQUIREMENTS:\n- Use ONLY {cuisine_name} ingredients, spices, and cooking methods\n- The dish name MUST be a {cuisine_name} dish name\n- DO NOT use ingredients or spices from other cuisines (e.g., if {cuisine_name} is 'Chinese', do NOT use Indian spices like garam masala, turmeric, or curry powder - use Chinese ingredients like soy sauce, ginger, garlic, Chinese five-spice instead)\n- If inventory contains ingredients from other cuisines, IGNORE them completely\n- Create an authentic {cuisine_name} recipe even if it means not using inventory items from other cuisines\n\nThis cuisine requirement OVERRIDES all other considerations except safety and allergies."
+            
+            system_prompt = f"""You are a helpful cooking assistant.{cuisine_mentioned}
+
+🚫 Safety: Never suggest recipes with harmful, illegal, or unethical ingredients.
+
+🚨🚨🚨 CRITICAL ALLERGY SAFETY RULE - ABSOLUTE PRIORITY 🚨🚨🚨
+If the user specifies allergies in their prompt:
+- READ THE ALLERGY SECTION IN THE PROMPT FIRST BEFORE ANYTHING ELSE!
+- DO NOT IGNORE THE ALLERGY WARNINGS - THEY ARE LIFE-THREATENING!
+- DO NOT generate dishes that typically contain those allergens
+- DO NOT include the allergen name in the recipe name
+  Example: If allergic to chicken → NEVER name it "Chicken Biryani", "Arroz con Pollo", "Butter Chicken"
+  Example: If allergic to chicken → ALWAYS name it "Vegetable Biryani", "Arroz con Verduras", "Paneer Butter Masala"
+- DO NOT mention the allergen in the description
+- Instead, generate a COMPLETELY DIFFERENT dish that naturally doesn't contain the allergen
+- This rule OVERRIDES all other preferences including cuisine type
+
+Follow the user's requirements in their prompt. Pay special attention to:
+- Allergies (ABSOLUTE HIGHEST PRIORITY - never generate dishes with allergen names)
+- Cuisine preferences (if specified and no allergy conflicts)
+- Specific dish requests (only if no allergy conflicts)
+- Available ingredients
+- Dietary restrictions
+
+Respond with valid JSON: {{"name": "Recipe Name", "description": "Recipe description", "servings": 4, "ingredients": [{{"name": "ingredient", "quantity": 1, "unit": "unit"}}], "instructions": ["step 1", "step 2"]}}"""
+
+            logger.info(f"Sending prompt to OpenAI (length: {len(prompt)} chars)")
+            if cuisine_mentioned:
+                logger.info(f"CUISINE DETECTED IN PROMPT - System prompt enhanced with cuisine awareness")
             
             response = client.chat.completions.create(
                 model="gpt-4o-mini",  # Using GPT-4o-mini for better quality and lower cost
                 messages=[
-                    {"role": "system", "content": "You are a professional chef creating AUTHENTIC, TRADITIONAL, and ETHICAL recipes. 🚫 SAFETY RULES - ABSOLUTE PROHIBITIONS: NEVER create recipes with: human meat/flesh/body parts, pets (dogs, cats), endangered animals, toxic/poisonous substances, inedible items (plastic, metal, dirt), illegal drugs, or any harmful/dangerous ingredients. ONLY create recipes with legitimate, edible, ethical food ingredients. If a request violates these rules, refuse it. ✅ RECIPE RULES: 1) When user requests a specific dish (e.g., 'tea', 'paneer butter masala'), create that EXACT dish with ONLY authentic ingredients. 2) NEVER add random ingredients that don't belong - if they ask for tea, use only tea ingredients (tea, water, milk, sugar, authentic tea spices like ginger/cardamom). DO NOT add butter, chilly powder, garam masala, or vegetables to tea! 3) Authenticity is MORE important than using inventory items. 4) If inventory has wrong ingredients for the requested dish, ignore them - don't force them in. Always respond with valid JSON: {\"name\": \"Recipe Name\", \"description\": \"Recipe description\", \"servings\": 4, \"ingredients\": [{\"name\": \"ingredient\", \"quantity\": 1, \"unit\": \"unit\"}], \"instructions\": [\"step 1\", \"step 2\"]}"},
+                    {"role": "system", "content": system_prompt},
                     {"role": "user", "content": prompt}
                 ],
-                temperature=0.2,
+                temperature=0.8,  # Increased from 0.2 to 0.8 for variety - different recipes each time
                 max_tokens=2000,
                 response_format={"type": "json_object"}
             )
@@ -204,8 +266,6 @@ class LLMClient:
             from openai import OpenAI
             
             client = OpenAI(api_key=self.api_key)
-            # Wrap client with Opik tracking
-            client = track_openai(client, project_name="smart-kitchen-assistant")
             
             prompt = f"""Parse the following ingredient text and extract the quantity, unit, and item name.
 Return ONLY a valid JSON object with these exact keys: "quantity", "unit", "item_name".
@@ -361,7 +421,6 @@ Output:"""
             from openai import OpenAI
             
             client = OpenAI(api_key=self.api_key)
-            client = track_openai(client, project_name="smart-kitchen-assistant")
             
             # Format ingredients for the prompt
             ingredients_text = "\n".join([

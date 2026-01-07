@@ -24,15 +24,12 @@ def planner_node(state: ShoppingAssistantState, db_helper: DatabaseHelper) -> Sh
     """
     preferences = state.get("preferences")
     servings = state.get("servings", 4)
+    cuisine = state.get("cuisine")  # Get cuisine from state
     inventory_usage = state.get("inventory_usage", "strict")
     allergies = state.get("allergies", [])  # Get allergies from state
     
     updated_state = state.copy()
     planner_agent = PlannerAgent(db_helper)
-    
-    # Restore recipe cache if available
-    recipe_cache = state.get("recipe_cache", {})
-    planner_agent.recipe_cache = recipe_cache
     
     try:
         # Get current inventory
@@ -53,22 +50,27 @@ def planner_node(state: ShoppingAssistantState, db_helper: DatabaseHelper) -> Sh
         # Suggest recipe using PlannerAgent
         # Ensure preferences is a string (not None)
         preferences_str = preferences if preferences else ""
-        recipe = planner_agent.suggest_recipe(preferences_str, servings, inventory_usage, allergies=allergies)
+        recipe = planner_agent.suggest_recipe(preferences_str, servings, inventory_usage, allergies=allergies, cuisine=cuisine)
         
-        # Update recipe cache
-        recipe_cache[recipe.get("name", "Unknown Recipe")] = recipe
-        updated_state["recipe_cache"] = recipe_cache
+        # Store recipe in state (no caching, just pass it through)
         updated_state["recipe"] = recipe
         
-        # Format response text
-        recipe_text = f"I suggest making {recipe['name']}. {recipe.get('description', '')} "
-        recipe_text += f"It serves {recipe.get('servings', servings)} people. "
+        # Format comprehensive response text with ALL recipe details
+        recipe_text = f"**{recipe['name']}**\n\n"
+        recipe_text += f"📝 Description: {recipe.get('description', '')}\n\n"
+        recipe_text += f"👥 Servings: {recipe.get('servings', servings)} people\n\n"
         
-        ingredients_list = [
-            f"{ing['quantity']} {ing.get('unit', 'units')} of {ing['name']}"
-            for ing in recipe.get('ingredients', [])
-        ]
-        recipe_text += f"You'll need: {', '.join(ingredients_list)}."
+        # Ingredients section
+        recipe_text += "🛒 Ingredients:\n"
+        ingredients_list = recipe.get('ingredients', [])
+        for ing in ingredients_list:
+            recipe_text += f"  • {ing.get('quantity')} {ing.get('unit', 'units')} {ing.get('name')}\n"
+        
+        # Instructions section
+        recipe_text += "\n📋 Instructions:\n"
+        instructions = recipe.get('instructions', [])
+        for i, instruction in enumerate(instructions, 1):
+            recipe_text += f"  {i}. {instruction}\n"
         
         updated_state["response_text"] = recipe_text
         updated_state["response_action"] = "recipe_suggested"

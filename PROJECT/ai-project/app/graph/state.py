@@ -21,6 +21,7 @@ class ShoppingAssistantState(TypedDict):
     preferences: Optional[str]
     servings: Optional[int]
     recipe_name: Optional[str]
+    cuisine: Optional[str]  # Cuisine type preference (e.g., "Italian", "Indian")
     inventory_usage: Optional[str]  # 'strict' or 'main' - controls how inventory is used in recipes
     allergies: Optional[List[str]]  # User allergies to exclude from recipes
     
@@ -39,7 +40,6 @@ class ShoppingAssistantState(TypedDict):
     success: bool
     
     # Internal state
-    recipe_cache: Annotated[Dict[str, Dict], "Cached recipes by name"]
     thresholds: Annotated[Dict[str, float], "Shopping thresholds per item"]
 
 

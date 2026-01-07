@@ -130,7 +130,6 @@ async def get_inventory(
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/inventory/add")
-@track(name="add_inventory_api")
 async def add_inventory(
     item: InventoryUpdate,
     current_user: models.User = Depends(get_current_user),
@@ -157,6 +156,7 @@ async def add_inventory(
                     "preferences": None,
                     "servings": None,
                     "recipe_name": None,
+                    "cuisine": None,
                     "inventory": [],
                     "recipe": None,
                     "shopping_list": [],
@@ -165,7 +165,6 @@ async def add_inventory(
                     "response_data": None,
                     "error": None,
                     "success": False,
-                    "recipe_cache": {},
                     "thresholds": {}
                 }
                 
@@ -194,7 +193,6 @@ async def add_inventory(
         raise HTTPException(status_code=500, detail=f"Error adding item: {str(e)}")
 
 @app.post("/api/inventory/remove")
-@track(name="remove_inventory_api")
 async def remove_inventory(
     item: InventoryRemove,
     current_user: models.User = Depends(get_current_user),
@@ -220,6 +218,7 @@ async def remove_inventory(
                 "preferences": None,
                 "servings": None,
                 "recipe_name": None,
+                "cuisine": None,
                 "inventory": [],
                 "recipe": None,
                 "shopping_list": [],
@@ -321,7 +320,6 @@ class ParseIngredientResponse(BaseModel):
     item_name: str
 
 @app.post("/api/inventory/parse", response_model=ParseIngredientResponse)
-@track(name="parse_ingredient_api")
 async def parse_ingredient_text(
     request: ParseIngredientRequest,
     current_user: models.User = Depends(get_current_user)
@@ -339,22 +337,6 @@ async def parse_ingredient_text(
         parsed = llm_client.parse_ingredient_text(request.text)
         
         logger.info(f"Parsed ingredient '{request.text}' -> {parsed}")
-        
-        # Update current trace with input/output metadata
-        try:
-            from opik import opik_context
-            opik_context.update_current_trace(
-                input={"text": request.text},
-                output=parsed,
-                metadata={
-                    "user_id": current_user.id,
-                    "operation": "ingredient_parsing",
-                    "llm_model": "gpt-4o-mini"
-                },
-                tags=["ingredient-parse", "llm-call", "voice-input"]
-            )
-        except Exception as e:
-            logger.warning(f"Could not update trace metadata: {e}")
         
         return ParseIngredientResponse(
             quantity=parsed["quantity"],
@@ -464,11 +446,6 @@ async def generate_meal_plan(
                 # DO NOT modify or wrap the user's preferences
                 preferences_str = request.preferences or ""
                 
-                # If user specified a cuisine, only add it if there are no preferences yet
-                # Otherwise, the user's specific dish request takes priority
-                if request.cuisine and not preferences_str:
-                    preferences_str = f"{request.cuisine} cuisine"
-                
                 # Ensure preferences is a string
                 preferences_str = str(preferences_str).strip() if preferences_str else ""
                 
@@ -487,6 +464,7 @@ async def generate_meal_plan(
                     "preferences": preferences_str,  # User's exact dish request
                     "servings": request.servings,
                     "recipe_name": None,
+                    "cuisine": request.cuisine,  # Pass cuisine separately to state
                     "inventory_usage": request.inventory_usage or "strict",
                     "allergies": user_allergies,  # Include user allergies in state
                     "inventory": [],
@@ -497,7 +475,6 @@ async def generate_meal_plan(
                     "response_data": None,
                     "error": None,
                     "success": False,
-                    "recipe_cache": {},
                     "thresholds": {}
                 }
                 
@@ -536,22 +513,35 @@ async def generate_meal_plan(
         # Use user's exact preferences - don't modify their specific dish request
         preferences_str = request.preferences or ""
         
-        # Only add cuisine if user hasn't specified a dish
-        if request.cuisine and not preferences_str:
-            preferences_str = f"{request.cuisine} cuisine"
-        
         recipe = planner_agent.suggest_recipe(
             preferences_str, 
             request.servings, 
             request.inventory_usage or "strict",
-            allergies=user_allergies
+            allergies=user_allergies,
+            cuisine=request.cuisine  # Pass cuisine separately
         )
         
         logger.info(f"Meal plan generated via direct agent: {recipe.get('name', 'Unknown')}")
+        
+        # Format comprehensive response text with ALL recipe details
+        response_text = f"**{recipe.get('name', 'Recipe')}**\n\n"
+        response_text += f"📝 Description: {recipe.get('description', '')}\n\n"
+        response_text += f"👥 Servings: {recipe.get('servings', request.servings)} people\n\n"
+        
+        # Ingredients section
+        response_text += "🛒 Ingredients:\n"
+        for ing in recipe.get('ingredients', []):
+            response_text += f"  • {ing.get('quantity')} {ing.get('unit', 'units')} {ing.get('name')}\n"
+        
+        # Instructions section
+        response_text += "\n📋 Instructions:\n"
+        for i, instruction in enumerate(recipe.get('instructions', []), 1):
+            response_text += f"  {i}. {instruction}\n"
+        
         return {
             "message": "Meal plan generated successfully",
             "recipe": recipe,
-            "response_text": f"I suggest making {recipe.get('name', 'a recipe')}."
+            "response_text": response_text
         }
         
     except HTTPException:
@@ -608,7 +598,6 @@ async def get_shopping_list(
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/shopping-list/add")
-@track(name="add_shopping_list_item_api")
 async def add_shopping_list_item(
     item: ShoppingListItemUpdate,
     current_user: models.User = Depends(get_current_user),
@@ -659,7 +648,6 @@ async def delete_shopping_list_item(
 
 # Confirm meal plan endpoint
 @app.post("/api/meal-plan/confirm")
-@track(name="confirm_meal_plan_api")
 async def confirm_meal_plan(
     request: ConfirmMealPlanRequest,
     current_user: models.User = Depends(get_current_user),
@@ -874,24 +862,6 @@ async def confirm_meal_plan(
                    f"{len(items_added_to_shopping_list)} items added to shopping list, "
                    f"{len(items_reduced_from_inventory)} items reduced, "
                    f"{len(items_deleted_from_inventory)} items deleted from inventory")
-        
-        # Update current trace with detailed results
-        try:
-            from opik import opik_context
-            opik_context.update_current_trace(
-                metadata={
-                    "original_ingredients_count": len(request.ingredients),
-                    "parsed_ingredients_count": len(parsed_ingredients),
-                    "total_ingredients_processed": len(parsed_ingredients),
-                    "shopping_list_additions": len(items_added_to_shopping_list),
-                    "inventory_reductions": len(items_reduced_from_inventory),
-                    "inventory_deletions": len(items_deleted_from_inventory),
-                    "llm_parsing_enabled": True
-                },
-                tags=["meal-plan-confirm", "inventory-update", "shopping-list-update", "llm-parsing"]
-            )
-        except Exception as e:
-            logger.warning(f"Could not update trace metadata: {e}")
         
         return {
             "message": "Meal plan confirmed",

@@ -8,7 +8,6 @@ from typing import Dict, List, Optional
 
 from app.database_helper import DatabaseHelper
 from app.llm.llm_client import LLMClient
-from opik import track
 
 logger = logging.getLogger(__name__)
 
@@ -18,11 +17,9 @@ class PlannerAgent:
     
     def __init__(self, db_helper: DatabaseHelper):
         self.db_helper = db_helper
-        self.recipe_cache: Dict[str, Dict] = {}
         self.llm_client = LLMClient()  # Initialize LLM client
     
-    @track(name="planner_suggest_recipe")
-    def suggest_recipe(self, preferences: Optional[str] = None, servings: int = 4, inventory_usage: str = "strict", allergies: Optional[List[str]] = None) -> Dict:
+    def suggest_recipe(self, preferences: Optional[str] = None, servings: int = 4, inventory_usage: str = "strict", allergies: Optional[List[str]] = None, cuisine: Optional[str] = None) -> Dict:
         """
         Suggest a recipe based on available ingredients using LLM
         
@@ -31,6 +28,7 @@ class PlannerAgent:
             servings: Number of servings
             inventory_usage: How to use inventory - "strict" (only use inventory items) or "main" (use inventory as main ingredients)
             allergies: Optional list of allergies to exclude from the recipe
+            cuisine: Optional cuisine type preference (e.g., "Italian", "Indian")
             
         Returns:
             Dictionary containing recipe details
@@ -54,31 +52,24 @@ class PlannerAgent:
             # Log inventory details for debugging
             logger.info(f"Inventory items: {[item['name'] for item in inventory]}")
             
-            # Update trace with inventory information
-            try:
-                from opik import opik_context
-                inventory_summary = [
-                    f"{item['name']}: {item['quantity']} {item['unit']}" 
-                    for item in inventory
-                ]
-                opik_context.update_current_span(
-                    metadata={
-                        "inventory_count": len(inventory),
-                        "inventory_items": inventory_summary,
-                        "preferences": preferences or "None",
-                        "servings": servings,
-                        "inventory_usage": inventory_usage
-                    },
-                    tags=["recipe-generation", "inventory-based"]
-                )
-            except Exception as e:
-                logger.warning(f"Could not update span metadata: {e}")
-            
             # Build prompt for LLM
-            prompt = self._build_recipe_prompt(inventory, preferences, servings, inventory_usage, allergies)
+            prompt = self._build_recipe_prompt(inventory, preferences, servings, inventory_usage, allergies, cuisine)
             logger.info(f"Built prompt for LLM (length: {len(prompt)} chars) with inventory_usage={inventory_usage}")
-            logger.info(f"User preferences received: '{preferences}'")
-            logger.info(f"Full prompt being sent to LLM:\n{prompt[:500]}...")  # Log first 500 chars
+            logger.info(f"User preferences received: '{preferences}', cuisine: '{cuisine}'")
+            
+            # Log cuisine presence in prompt
+            if cuisine:
+                if f"{cuisine}" in prompt or "CUISINE" in prompt.upper():
+                    logger.info(f"✅ CUISINE '{cuisine}' FOUND IN PROMPT")
+                    # Log the cuisine section
+                    cuisine_section_start = prompt.find("CRITICAL CUISINE REQUIREMENT")
+                    if cuisine_section_start > 0:
+                        cuisine_section = prompt[cuisine_section_start:cuisine_section_start+500]
+                        logger.info(f"Cuisine section in prompt:\n{cuisine_section}...")
+                else:
+                    logger.error(f"❌ CUISINE '{cuisine}' NOT FOUND IN PROMPT!")
+            
+            logger.info(f"Full prompt being sent to LLM (first 1000 chars):\n{prompt[:1000]}...")
             
             # Generate recipe using LLM
             logger.info(f"Calling LLM to generate recipe for {servings} servings with preferences: {preferences}")
@@ -116,10 +107,42 @@ class PlannerAgent:
             
             # Validate recipe doesn't contain allergens
             if allergies and len(allergies) > 0:
+                # First check if recipe NAME contains allergen
+                recipe_name = recipe.get("name", "").lower()
+                recipe_desc = recipe.get("description", "").lower()
+                
+                contains_allergen_in_name = False
+                violated_allergen = None
+                
+                for allergen in allergies:
+                    allergen_lower = allergen.lower()
+                    if allergen_lower in recipe_name:
+                        logger.error(f"🚨 ALLERGY VIOLATION: Recipe name '{recipe.get('name')}' contains allergen '{allergen}'!")
+                        logger.error(f"This is a CRITICAL SAFETY VIOLATION - rejecting this recipe!")
+                        contains_allergen_in_name = True
+                        violated_allergen = allergen
+                        break
+                    if allergen_lower in recipe_desc:
+                        logger.warning(f"⚠️ ALLERGY WARNING: Recipe description mentions allergen '{allergen}'")
+                
+                # If recipe name contains allergen, REJECT it and return error
+                if contains_allergen_in_name:
+                    logger.error(f"❌ REJECTING RECIPE: Cannot serve '{recipe.get('name')}' to user allergic to {violated_allergen}")
+                    return {
+                        "name": "Recipe Generation Failed",
+                        "description": f"The AI attempted to generate a recipe containing {violated_allergen}, which you are allergic to. This is a safety violation. Please try generating again or contact support.",
+                        "ingredients": [],
+                        "instructions": [
+                            f"The system tried to generate '{recipe.get('name')}' which contains {violated_allergen}",
+                            "This recipe was automatically rejected for your safety",
+                            "Please click 'Generate Meal Plan' again to get a safe recipe",
+                            f"We will ensure the next recipe does not contain {violated_allergen}"
+                        ],
+                        "servings": servings
+                    }
+                
+                # Filter allergens from ingredients
                 recipe = self._validate_and_filter_allergens(recipe, allergies)
-            
-            # Cache the recipe for potential application
-            self.recipe_cache[recipe.get("name", "Unknown Recipe")] = recipe
             
             logger.info(f"Successfully generated recipe: {recipe.get('name')} for {servings} servings")
             return recipe
@@ -165,7 +188,7 @@ class PlannerAgent:
             "servings": servings
         }
     
-    def _build_recipe_prompt(self, inventory: List[Dict], preferences: Optional[str], servings: int, inventory_usage: str = "strict", allergies: Optional[List[str]] = None) -> str:
+    def _build_recipe_prompt(self, inventory: List[Dict], preferences: Optional[str], servings: int, inventory_usage: str = "strict", allergies: Optional[List[str]] = None, cuisine: Optional[str] = None) -> str:
         """Build a prompt for the LLM to generate a recipe"""
         
         # Safety check on preferences
@@ -189,7 +212,33 @@ class PlannerAgent:
         allergies_section = ""
         if allergies and len(allergies) > 0:
             allergies_list = ", ".join(allergies)
+            # Create specific examples for the given allergens
+            allergen_examples = []
+            for allergen in allergies:
+                allergen_lower = allergen.lower()
+                allergen_examples.append(f"   ❌ DO NOT: '{allergen} Biryani', '{allergen} Curry', '{allergen} Tikka', or ANY dish name containing '{allergen}'")
+                allergen_examples.append(f"   ✅ INSTEAD: 'Vegetable Biryani', 'Paneer Curry', 'Mushroom Tikka', or any dish WITHOUT '{allergen}'")
+            
+            allergen_examples_text = "\n".join(allergen_examples)
+            
             allergies_section = f"""
+🚨🚨🚨🚨🚨 CRITICAL ALLERGY WARNING - READ THIS FIRST! 🚨🚨🚨🚨🚨
+
+USER IS ALLERGIC TO: {allergies_list}
+
+⛔️⛔️⛔️ ABSOLUTE PROHIBITION ⛔️⛔️⛔️
+DO NOT GENERATE ANY DISH THAT CONTAINS "{allergies_list.upper()}" IN THE NAME!
+
+EXAMPLES FOR THIS USER'S ALLERGIES:
+{allergen_examples_text}
+
+If user requests Indian cuisine and is allergic to chicken:
+   ❌ NEVER generate: "Chicken Biryani", "Chicken Tikka Masala", "Butter Chicken"
+   ✅ ALWAYS generate: "Vegetable Biryani", "Paneer Tikka Masala", "Paneer Butter Masala"
+
+THIS IS A LIFE-THREATENING SAFETY ISSUE - VIOLATING THIS WILL CAUSE HARM!
+========================================================================
+
 🚨🚨🚨 CRITICAL - ALLERGY RESTRICTIONS - HIGHEST PRIORITY 🚨🚨🚨
 The user has the following allergies that MUST be completely excluded from the recipe:
 {allergies_list}
@@ -266,241 +315,88 @@ BEFORE RETURNING THE RECIPE, VERIFY:
 
 """
         
-        # Build inventory constraint instruction based on usage mode
+        # Build simplified inventory constraint
         if inventory_usage == "strict":
-            inventory_constraint = f"""
-INVENTORY CONSTRAINT - STRICT MODE:
-
-You should prioritize using ingredients from the available inventory list below.
-
-Available inventory items:
-
-{inventory_item_names}
-
-🚨 CRITICAL RULE - AUTHENTICITY OVER INVENTORY 🚨
-
-If the user requested a specific dish (like "tea", "paneer butter masala", etc.):
-
-1. FIRST PRIORITY: Recipe must be AUTHENTIC to the requested dish
-
-2. SECOND PRIORITY: Use inventory items that actually belong in that dish
-
-3. NEVER add inventory items that don't belong in the dish just to use them up
-
-SPECIFIC INSTRUCTIONS:
-
-- If inventory has the RIGHT ingredients for the dish → Use them
-
-- If inventory has SOME right ingredients → Use those, mention missing ones in description
-
-- If inventory has WRONG ingredients → DO NOT force them into the recipe!
-
-EXAMPLE - User asks for "tea":
-
-- ✅ Use from inventory: tea powder, water, milk, sugar (if available)
-
-- ✅ Can add: ginger, cardamom (authentic tea spices)
-
-- ❌ DO NOT add: butter, chilly powder, garam masala, coriander, tomatoes (these don't belong in tea!)
-
-EXAMPLE - User asks for "paneer butter masala":
-
-- ✅ Use from inventory: paneer, butter, tomatoes, cream, onions, spices
-
-- ❌ DO NOT add: tea powder, unrelated vegetables, meat (if they asked for paneer!)
-
-🔴 BOTTOM LINE: Authenticity of the requested dish is MORE IMPORTANT than using all inventory items!
-
-"""
+            inventory_constraint = f"Use ingredients from inventory when possible. Available: {inventory_item_names}"
         else:  # inventory_usage == "main"
-            inventory_constraint = f"""
-INVENTORY USAGE INSTRUCTION - FLEXIBLE MODE:
-
-The ingredients listed in the inventory can be used as MAIN ingredients in your recipe.
-
-Available inventory:
-
-{inventory_item_names}
-
-YOU MAY ADD INGREDIENTS that are needed for authentic recipes:
-
-- Common basics: water, salt, sugar, oil, butter
-
-- Authentic spices and seasonings needed for the dish
-
-- Any ingredient essential for making the requested dish properly
-
-RULES:
-
-1. If the user requested a specific dish (like "tea", "biryani", etc.), create an AUTHENTIC recipe for that dish
-
-2. Use inventory items that fit the dish
-
-3. Add any missing essential ingredients for authenticity
-
-4. DO NOT force inventory items that don't belong in the dish
-
-EXAMPLE - User asks for "tea" with inventory containing butter, chilly powder:
-
-- ✅ Create authentic tea: tea powder, water, milk, sugar (add these even if not in inventory)
-
-- ✅ Add authentic tea spices: ginger, cardamom (add if needed for good tea)
-
-- ❌ DO NOT force: butter, chilly powder (these don't belong in tea)
-
-The goal is to create an AUTHENTIC, DELICIOUS recipe - not to randomly use inventory items!
-
-"""
+            inventory_constraint = f"Inventory items ({inventory_item_names}) can be used as main ingredients. You may add other ingredients needed for the recipe."
         
-        # Build the main prompt with exact structure
-        prompt = f"""Generate a detailed recipe based on the following available ingredients and requirements.
-
-
-
-🚫 SAFETY WARNING - ABSOLUTE PROHIBITIONS:
-
-You MUST NOT create recipes containing:
-
-- Human meat, flesh, or body parts
-
-- Pets (dogs, cats, etc.)
-
-- Endangered or protected animals
-
-- Toxic, poisonous, or harmful substances
-
-- Inedible items (plastic, metal, dirt, etc.)
-
-- Illegal drugs or dangerous substances
-
-- Any unethical, harmful, or inappropriate ingredients
-
-ONLY create recipes with legitimate, safe, edible food ingredients that are culturally appropriate and ethical.
-
-{allergies_section}
-Available ingredients in inventory:
-
-{inventory_text}
-
-{inventory_constraint}Requirements:
-
-- Number of servings: {servings}
-"""
+        # Build simplified cuisine instruction
+        cuisine_instruction = ""
+        if cuisine:
+            cuisine_instruction = f"The recipe should be authentic {cuisine} cuisine - use {cuisine} ingredients, cooking methods, and dish names. If inventory has ingredients from other cuisines, ignore them."
         
+        # Build simplified, natural prompt - no explicit "generate recipe" instructions
+        prompt_parts = []
+        
+        # 🚨🚨🚨 ALLERGIES MUST BE FIRST - HIGHEST PRIORITY! 🚨🚨🚨
+        if allergies and len(allergies) > 0:
+            prompt_parts.append(allergies_section)  # Put allergies at the VERY TOP!
+        
+        # Safety note (minimal)
+        prompt_parts.append("Note: Only suggest recipes with safe, edible ingredients.")
+        
+        # 🍽️ DIETARY PREFERENCES - IMPORTANT!
         if preferences:
-            prompt += f"""
-- REQUESTED DISH: "{preferences}"
-
-🚨 CRITICAL INSTRUCTION - DISH NAME ACCURACY 🚨
-
-The user has specifically requested to make "{preferences}". 
-
-This is the EXACT dish they want - you MUST NOT change, substitute, or create a different dish.
-
-⚠️ AUTHENTICITY IS MANDATORY ⚠️
-
-You MUST create an AUTHENTIC, TRADITIONAL recipe for "{preferences}".
-
-ONLY include ingredients that ACTUALLY BELONG in "{preferences}".
-
-DO NOT add random ingredients just because they are in inventory!
-
-EXAMPLES OF WHAT NOT TO DO:
-
-❌ User asks for "tea" → You add butter, chilly powder, garam masala (WRONG! Tea doesn't need these!)
-
-❌ User asks for "tea" → You add coriander, tomatoes (WRONG! These don't belong in tea!)
-
-❌ User asks for "paneer butter masala" → You give "chicken butter masala" (WRONG - they asked for paneer!)
-
-❌ User asks for "tea" → You give "tea with meat" (WRONG - tea doesn't have meat!)
-
-WHAT YOU MUST DO:
-
-✅ If they ask for "tea" → ONLY use: tea leaves/powder, water, milk (optional), sugar (optional), and authentic tea spices like cardamom, ginger, cinnamon (NOT random spices!)
-
-✅ If they ask for "paneer butter masala" → ONLY use: paneer, butter, tomatoes, cream, onions, garlic, ginger, and authentic Indian spices for this dish
-
-✅ If they ask for "biryani" → ONLY use ingredients that belong in biryani
-
-🔴 IRON RULE: If an ingredient from inventory does NOT belong in the traditional "{preferences}" recipe, DO NOT USE IT - even if it's available!
-
-Examples for TEA specifically:
-
-- ✅ Authentic tea ingredients: tea leaves/powder, water, milk, sugar, cardamom, ginger, cloves, cinnamon
-
-- ❌ DO NOT add to tea: butter, chilly powder, garam masala, coriander, tomatoes, meat, vegetables, cheese, etc.
-
-THE DISH NAME IN YOUR RECIPE MUST MATCH OR CLOSELY RELATE TO: "{preferences}"
-
-Stay 100% authentic to the requested dish. IGNORE inventory items that don't belong in "{preferences}".
-
+            # Check if preferences contain dietary keywords
+            preferences_lower = preferences.lower()
+            dietary_instruction = ""
+            
+            if "non-veg" in preferences_lower or "non veg" in preferences_lower or "nonveg" in preferences_lower:
+                dietary_instruction = """
+🍖 DIETARY PREFERENCE: NON-VEGETARIAN
+- The user prefers NON-VEGETARIAN dishes
+- MUST include meat, poultry, seafood, or eggs in the recipe
+- DO NOT generate purely vegetarian/vegan dishes
+- Examples: chicken, lamb, fish, shrimp, beef, pork, eggs
+- This is a strong preference - prioritize meat-based dishes
 """
+            elif "vegetarian" in preferences_lower or "veg" in preferences_lower:
+                if "non" not in preferences_lower:  # Make sure it's not "non-veg"
+                    dietary_instruction = """
+🥗 DIETARY PREFERENCE: VEGETARIAN
+- The user prefers VEGETARIAN dishes
+- DO NOT include meat, poultry, or seafood
+- Can include dairy products and eggs
+- Examples: paneer, vegetables, lentils, beans, eggs, cheese
+"""
+            elif "vegan" in preferences_lower:
+                dietary_instruction = """
+🌱 DIETARY PREFERENCE: VEGAN
+- The user prefers VEGAN dishes
+- DO NOT include ANY animal products (meat, dairy, eggs, honey)
+- Use only plant-based ingredients
+- Examples: vegetables, fruits, legumes, grains, nuts, plant-based proteins
+"""
+            
+            if dietary_instruction:
+                prompt_parts.append(dietary_instruction)
         
-        prompt += """
-Please generate a complete recipe with:
-
-1. A recipe name that matches the requested dish (if specified) - this name will be used as the title, so make it a proper dish name (e.g., "Vegetable Biryani", "Paneer Butter Masala", NOT "Recipe" or "Meal Plan")
-
-2. A brief description of the dish (do NOT mention any allergens in the description - describe the dish naturally without referencing excluded ingredients)
-
-3. A list of ingredients with exact quantities needed (scaled appropriately for the number of servings)
-
-4. Step-by-step cooking instructions
-
-Important:
-
-- If a specific dish name was requested, the recipe MUST be for that exact dish - no substitutions or creative variations
-
-- If dietary preferences are specified (e.g., vegetarian, vegan, gluten-free, low-carb), STRICTLY ADHERE to them
-
-- For vegetarian: exclude all meat, poultry, and seafood
-
-- For vegan: exclude all animal products (meat, dairy, eggs, honey)
-
-- For gluten-free: exclude wheat, barley, rye, and their derivatives
-
-- Dietary preferences override inventory suggestions - never include ingredients that violate dietary restrictions
-
-- Scale ingredient quantities appropriately for the number of servings requested
-
-- Make sure the recipe is practical and can be made with the constraints specified above
-
-- If a cuisine type is specified, make the recipe authentic to that cuisine
-
-- Include all necessary cooking steps in detail
-
-- Be accurate and authentic to traditional recipes
-
-Respond with a JSON object in this exact format:
-
-{
-
-  "name": "Recipe Name",
-
-  "description": "Brief description of the dish",
-
-  "servings": <number>,
-
-  "ingredients": [
-
-    {"name": "ingredient name", "quantity": <number>, "unit": "unit"}
-
-  ],
-
-  "instructions": [
-
-    "Step 1 description",
-
-    "Step 2 description",
-
-    ...
-
-  ]
-
-}
-
-"""
+        # Inventory
+        prompt_parts.append(f"Available ingredients:\n{inventory_text}")
+        
+        # Cuisine (prominent but natural)
+        if cuisine:
+            prompt_parts.append(f"Cuisine preference: {cuisine} cuisine")
+        
+        # Preferences
+        if preferences:
+            prompt_parts.append(f"Requested dish: {preferences}")
+        
+        # Servings
+        prompt_parts.append(f"Servings: {servings}")
+        
+        # Inventory usage constraint (simplified)
+        prompt_parts.append(inventory_constraint)
+        
+        # Cuisine instruction (if provided)
+        if cuisine_instruction:
+            prompt_parts.append(cuisine_instruction)
+        
+        # Simple request
+        prompt_parts.append("\nProvide a recipe in JSON format with: name, description, servings, ingredients (with quantities and units), and step-by-step instructions.")
+        
+        prompt = "\n\n".join(prompt_parts)
         
         return prompt
     
@@ -603,25 +499,25 @@ Respond with a JSON object in this exact format:
         
         return recipe
     
-    def apply_recipe(self, recipe_name: str, servings: Optional[int] = None) -> Dict:
+    def apply_recipe(self, recipe: Dict, servings: Optional[int] = None) -> Dict:
         """
         Apply a recipe by removing ingredients from inventory
         
         Args:
-            recipe_name: Name of the recipe to apply
+            recipe: Recipe dictionary with ingredients
             servings: Optional number of servings (for scaling)
             
         Returns:
             Dictionary with application results
         """
         try:
-            if recipe_name not in self.recipe_cache:
+            if not recipe or not isinstance(recipe, dict):
                 return {
                     "success": False,
-                    "message": f"Recipe '{recipe_name}' not found in cache"
+                    "message": f"Invalid recipe provided"
                 }
             
-            recipe = self.recipe_cache[recipe_name]
+            recipe_name = recipe.get("name", "Unknown Recipe")
             ingredients = recipe.get("ingredients", [])
             
             # Scale ingredients if servings specified

@@ -19,7 +19,7 @@ class ContentFilter:
         'body', 'corpse', 'blood', 'organs', 'brain',
         
         # Pets and companion animals
-        'dog', 'cat', 'puppy', 'kitten', 'pet',
+        'dog', 'cat', 'puppy', 'kitten', 'pet','snake',
         
         # Endangered/protected animals
         'endangered', 'protected species',

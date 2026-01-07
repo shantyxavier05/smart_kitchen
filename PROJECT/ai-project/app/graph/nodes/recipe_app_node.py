@@ -22,33 +22,21 @@ def recipe_app_node(state: ShoppingAssistantState, db_helper: DatabaseHelper) ->
     Returns:
         Updated state with recipe application results
     """
-    recipe_name = state.get("recipe_name")
+    recipe = state.get("recipe")  # Get the recipe directly from state
     servings = state.get("servings")
-    recipe_cache = state.get("recipe_cache", {})
     
     updated_state = state.copy()
     planner_agent = PlannerAgent(db_helper)
     
-    # Restore recipe cache
-    planner_agent.recipe_cache = recipe_cache
-    
     try:
-        if not recipe_name:
-            updated_state["error"] = "Recipe name is required"
-            updated_state["success"] = False
-            return updated_state
-        
-        if recipe_name not in recipe_cache:
-            updated_state["error"] = "Recipe not found. Please generate a recipe first."
+        if not recipe:
+            updated_state["error"] = "Recipe is required"
             updated_state["success"] = False
             updated_state["response_text"] = "Recipe not found. Please generate a recipe first."
             return updated_state
         
-        # Apply recipe
-        result = planner_agent.apply_recipe(recipe_name, servings)
-        
-        # Update recipe cache
-        updated_state["recipe_cache"] = planner_agent.recipe_cache
+        # Apply recipe (pass recipe directly, not by name)
+        result = planner_agent.apply_recipe(recipe, servings)
         
         # Refresh inventory
         updated_state["inventory"] = db_helper.get_all_inventory()
