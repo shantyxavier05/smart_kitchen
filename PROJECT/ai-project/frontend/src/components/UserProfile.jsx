@@ -15,13 +15,6 @@ function UserProfile() {
   const availableDiets = ['Vegetarian', 'Vegan', 'Low-Carb', 'Gluten-Free', 'Keto']
   const [savingGoals, setSavingGoals] = useState(false)
   
-  // Notification preferences state
-  const [notifications, setNotifications] = useState({
-    inventoryExpiry: true,
-    mealPlanReminders: true,
-    shoppingListUpdates: false,
-    specialOffers: false
-  })
   
   // Fetch user profile data on component mount
   useEffect(() => {
@@ -100,13 +93,6 @@ function UserProfile() {
     }
   }
 
-  // Notification handlers
-  const toggleNotification = (key) => {
-    setNotifications({
-      ...notifications,
-      [key]: !notifications[key]
-    })
-  }
 
   // Save handlers
   const handleSaveAllergies = async () => {
@@ -173,11 +159,6 @@ function UserProfile() {
     }
   }
 
-  const handleSaveNotifications = () => {
-    // TODO: Implement API call
-    console.log('Saving notifications:', notifications)
-    alert('Notification preferences saved successfully!')
-  }
 
   return (
     <div className="user-profile-page">
@@ -319,81 +300,6 @@ function UserProfile() {
             </div>
           </div>
 
-          {/* Notification Preferences */}
-          <div className="profile-card">
-            <div className="profile-card-header">
-              <h2 className="profile-card-title">Notification Preferences</h2>
-              <p className="profile-card-description">Choose what you want to be notified about.</p>
-            </div>
-            <div className="profile-card-body">
-              <div className="notification-options">
-                <div className="notification-item">
-                  <span className="notification-label">Inventory Expiry Alerts</span>
-                  <button 
-                    className={`notification-toggle ${notifications.inventoryExpiry ? 'active' : ''}`}
-                    onClick={() => toggleNotification('inventoryExpiry')}
-                    aria-label="Toggle inventory expiry alerts"
-                  >
-                    {notifications.inventoryExpiry ? (
-                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                        <polyline points="20 6 9 17 4 12"></polyline>
-                      </svg>
-                    ) : null}
-                  </button>
-                </div>
-                
-                <div className="notification-item">
-                  <span className="notification-label">Meal Plan Reminders</span>
-                  <button 
-                    className={`notification-toggle ${notifications.mealPlanReminders ? 'active' : ''}`}
-                    onClick={() => toggleNotification('mealPlanReminders')}
-                    aria-label="Toggle meal plan reminders"
-                  >
-                    {notifications.mealPlanReminders ? (
-                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                        <polyline points="20 6 9 17 4 12"></polyline>
-                      </svg>
-                    ) : null}
-                  </button>
-                </div>
-                
-                <div className="notification-item">
-                  <span className="notification-label">Shopping List Updates</span>
-                  <button 
-                    className={`notification-toggle ${notifications.shoppingListUpdates ? 'active' : ''}`}
-                    onClick={() => toggleNotification('shoppingListUpdates')}
-                    aria-label="Toggle shopping list updates"
-                  >
-                    {notifications.shoppingListUpdates ? (
-                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                        <polyline points="20 6 9 17 4 12"></polyline>
-                      </svg>
-                    ) : null}
-                  </button>
-                </div>
-                
-                <div className="notification-item">
-                  <span className="notification-label">Special Offers</span>
-                  <button 
-                    className={`notification-toggle ${notifications.specialOffers ? 'active' : ''}`}
-                    onClick={() => toggleNotification('specialOffers')}
-                    aria-label="Toggle special offers"
-                  >
-                    {notifications.specialOffers ? (
-                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                        <polyline points="20 6 9 17 4 12"></polyline>
-                      </svg>
-                    ) : null}
-                  </button>
-                </div>
-              </div>
-              <div className="profile-card-actions">
-                <button className="btn-save" onClick={handleSaveNotifications}>
-                  Save Notifications
-                </button>
-              </div>
-            </div>
-          </div>
 
         </div>
       </div>

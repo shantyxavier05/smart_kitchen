@@ -107,6 +107,8 @@ export function AuthProvider({ children }) {
     setToken(null)
     setUser(null)
     localStorage.removeItem('token')
+    // Clear session storage flags when logging out
+    sessionStorage.removeItem('inventoryOldItemsModalShown')
   }
 
   const value = {

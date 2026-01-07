@@ -18,10 +18,12 @@ function Inventory() {
   const [activeMenuId, setActiveMenuId] = useState(null)
   const [sortConfig, setSortConfig] = useState({ key: null, direction: 'asc' })
   const [filterText, setFilterText] = useState('')
+  const [showFilterInput, setShowFilterInput] = useState(false)
   const [isListening, setIsListening] = useState(false)
   const [voiceError, setVoiceError] = useState(null)
   const [pendingFormData, setPendingFormData] = useState(null)
   const [editingItem, setEditingItem] = useState(null) // Track if we're editing an item
+  const [showOldItemsModal, setShowOldItemsModal] = useState(false)
   const { user } = useAuth()
   const menuRef = useRef(null)
   const recognitionRef = useRef(null)
@@ -31,6 +33,22 @@ function Inventory() {
   useEffect(() => {
     fetchInventoryItems()
   }, [])
+
+  // Check for old items and show modal (only once per session)
+  useEffect(() => {
+    if (inventory.length > 0 && !loading) {
+      const oldItems = getOldItems()
+      if (oldItems.length > 0) {
+        // Check if modal has already been shown in this session
+        const hasSeenModal = sessionStorage.getItem('inventoryOldItemsModalShown')
+        if (!hasSeenModal) {
+          setShowOldItemsModal(true)
+          // Mark as shown in session storage
+          sessionStorage.setItem('inventoryOldItemsModalShown', 'true')
+        }
+      }
+    }
+  }, [inventory, loading])
 
   // Open modal when pendingFormData is set
   useEffect(() => {
@@ -243,6 +261,20 @@ function Inventory() {
       setError('Error removing item: ' + err.message)
       console.error('Error removing item:', err)
     }
+  }
+
+  // Get items that have been in inventory for more than 7 days
+  const getOldItems = () => {
+    const now = new Date()
+    const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
+    
+    return inventory.filter(item => {
+      const createdAt = item.created_at ? new Date(item.created_at) : null
+      if (!createdAt) return false
+      
+      // Check if item was created more than 7 days ago
+      return createdAt < sevenDaysAgo
+    })
   }
 
   // Format time ago
@@ -559,12 +591,6 @@ function Inventory() {
           </div>
           
           <div className="app-nav-right">
-            <button className="notification-btn">
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
-                <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
-              </svg>
-            </button>
             <UserMenu />
           </div>
 
@@ -601,6 +627,62 @@ function Inventory() {
           </div>
         )}
       </nav>
+
+      {/* Old Items Alert Modal */}
+      {showOldItemsModal && getOldItems().length > 0 && (
+        <div className="old-items-modal-overlay" onClick={() => {
+          setShowOldItemsModal(false)
+          // Mark as shown when user clicks outside
+          sessionStorage.setItem('inventoryOldItemsModalShown', 'true')
+        }}>
+          <div className="old-items-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="old-items-modal-header">
+              <div className="old-items-modal-title-section">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="old-items-icon">
+                  <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                  <line x1="12" y1="9" x2="12" y2="13"/>
+                  <line x1="12" y1="17" x2="12.01" y2="17"/>
+                </svg>
+                <h3>Items in Inventory for Over a Week</h3>
+              </div>
+              <button className="old-items-close-btn" onClick={() => {
+                setShowOldItemsModal(false)
+                // Mark as shown when user closes it
+                sessionStorage.setItem('inventoryOldItemsModalShown', 'true')
+              }}>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <line x1="18" y1="6" x2="6" y2="18"/>
+                  <line x1="6" y1="6" x2="18" y2="18"/>
+                </svg>
+              </button>
+            </div>
+            <div className="old-items-modal-body">
+              <p className="old-items-message">
+                These items have been in your inventory for more than 7 days. Try to use them faster to reduce waste!
+              </p>
+              <div className="old-items-list">
+                {getOldItems().map((item) => {
+                  const createdAt = item.created_at ? new Date(item.created_at) : new Date()
+                  const now = new Date()
+                  const diffInMs = now - createdAt
+                  const diffInDays = Math.floor(diffInMs / (1000 * 60 * 60 * 24))
+                  
+                  return (
+                    <div key={item.id} className="old-item-card">
+                      <div className="old-item-info">
+                        <span className="old-item-name">{item.name}</span>
+                        <span className="old-item-details">
+                          {item.quantity} {item.unit || 'units'} • {diffInDays} days in inventory
+                        </span>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Main Content */}
       <main className="main-content">
@@ -719,20 +801,59 @@ function Inventory() {
             <div className="section-header">
               <h2>Current Stock ({sortedAndFilteredInventory.length} items)</h2>
               <div className="header-actions">
-                <button className="icon-btn" onClick={() => handleSort('name')} aria-label="Sort">
+                <button 
+                  className={`icon-btn ${sortConfig.key ? 'active' : ''}`} 
+                  onClick={() => handleSort('name')} 
+                  aria-label="Sort"
+                  title="Sort by name"
+                >
                   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <line x1="3" y1="6" x2="21" y2="6"/>
                     <line x1="3" y1="12" x2="21" y2="12"/>
                     <line x1="3" y1="18" x2="15" y2="18"/>
                   </svg>
                 </button>
-                <button className="icon-btn" aria-label="Filter">
+                <button 
+                  className={`icon-btn ${filterText ? 'active' : ''}`} 
+                  onClick={() => setShowFilterInput(!showFilterInput)}
+                  aria-label="Filter"
+                  title="Filter items by name"
+                >
                   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/>
                   </svg>
                 </button>
               </div>
             </div>
+
+            {/* Filter Input */}
+            {showFilterInput && (
+              <div className="filter-input-container">
+                <input
+                  type="text"
+                  className="filter-input"
+                  placeholder="Filter by item name..."
+                  value={filterText}
+                  onChange={(e) => setFilterText(e.target.value)}
+                  autoFocus
+                />
+                {filterText && (
+                  <button 
+                    className="filter-clear-btn"
+                    onClick={() => {
+                      setFilterText('')
+                      setShowFilterInput(false)
+                    }}
+                    aria-label="Clear filter"
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <line x1="18" y1="6" x2="6" y2="18"/>
+                      <line x1="6" y1="6" x2="18" y2="18"/>
+                    </svg>
+                  </button>
+                )}
+              </div>
+            )}
 
             {/* Loading State */}
             {loading ? (
@@ -764,7 +885,7 @@ function Inventory() {
                             {item.quantity} {item.unit || 'units'}
                           </td>
                           <td className="item-stocked">
-                            {formatTimeAgo(item.created_at || item.updated_at)}
+                            {formatTimeAgo(item.updated_at || item.created_at)}
                           </td>
                           <td className="item-actions">
                             <div className="action-menu">
@@ -858,7 +979,7 @@ function Inventory() {
                         </div>
                         <div className="detail-row">
                           <span className="detail-label">Stocked:</span>
-                          <span className="detail-value">{formatTimeAgo(item.created_at || item.updated_at)}</span>
+                          <span className="detail-value">{formatTimeAgo(item.updated_at || item.created_at)}</span>
                         </div>
                       </div>
                     </div>

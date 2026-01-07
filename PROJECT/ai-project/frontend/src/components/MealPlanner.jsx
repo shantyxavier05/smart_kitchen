@@ -291,12 +291,6 @@ function MealPlanner() {
           </div>
           
           <div className="app-nav-right">
-            <button className="notification-btn">
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
-                <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
-              </svg>
-            </button>
             <UserMenu />
           </div>
 
@@ -475,7 +469,23 @@ function MealPlanner() {
                   min="1"
                   max="20"
                   value={servings}
-                  onChange={(e) => setServings(parseInt(e.target.value) || 4)}
+                  onChange={(e) => {
+                    const value = e.target.value
+                    if (value === '') {
+                      setServings('')
+                    } else {
+                      const numValue = parseInt(value, 10)
+                      if (!isNaN(numValue) && numValue >= 1) {
+                        setServings(numValue)
+                      }
+                    }
+                  }}
+                  onBlur={(e) => {
+                    const value = e.target.value
+                    if (value === '' || isNaN(parseInt(value, 10)) || parseInt(value, 10) < 1) {
+                      setServings(4)
+                    }
+                  }}
                   style={{
                     width: '100%',
                     padding: '10px 12px',
