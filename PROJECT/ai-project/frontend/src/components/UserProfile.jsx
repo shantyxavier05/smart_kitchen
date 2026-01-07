@@ -1,16 +1,19 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useAuth } from '../context/AuthContext'
 
 function UserProfile() {
   const { user } = useAuth()
   
   // Allergies state
-  const [allergies, setAllergies] = useState(['Peanuts', 'Shellfish'])
+  const [allergies, setAllergies] = useState([])
   const [allergyInput, setAllergyInput] = useState('')
+  const [loadingAllergies, setLoadingAllergies] = useState(false)
+  const [savingAllergies, setSavingAllergies] = useState(false)
   
   // Dietary goals state
-  const [dietaryGoals, setDietaryGoals] = useState(['Vegetarian', 'Vegan'])
+  const [dietaryGoals, setDietaryGoals] = useState([])
   const availableDiets = ['Vegetarian', 'Vegan', 'Low-Carb', 'Gluten-Free', 'Keto']
+  const [savingGoals, setSavingGoals] = useState(false)
   
   // Notification preferences state
   const [notifications, setNotifications] = useState({
@@ -19,14 +22,68 @@ function UserProfile() {
     shoppingListUpdates: false,
     specialOffers: false
   })
+  
+  // Fetch user profile data on component mount
+  useEffect(() => {
+    const fetchUserProfile = async () => {
+      const token = localStorage.getItem('token')
+      if (!token) return
+      
+      setLoadingAllergies(true)
+      try {
+        const response = await fetch('http://localhost:8000/api/user/profile', {
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
+        })
+        
+        if (response.ok) {
+          const data = await response.json()
+          setAllergies(data.allergies || [])
+          setDietaryGoals(data.dietary_goals || [])
+        }
+      } catch (err) {
+        console.error('Error fetching user profile:', err)
+      } finally {
+        setLoadingAllergies(false)
+      }
+    }
+    
+    fetchUserProfile()
+  }, [])
 
   // Allergy handlers
   const handleAddAllergy = (e) => {
-    if (e.key === 'Enter' && allergyInput.trim()) {
-      if (!allergies.includes(allergyInput.trim())) {
-        setAllergies([...allergies, allergyInput.trim()])
-      }
-      setAllergyInput('')
+    // Allow Enter key or button click
+    if (e && e.preventDefault) {
+      e.preventDefault()
+    }
+    
+    const trimmedInput = allergyInput.trim()
+    if (!trimmedInput) return
+    
+    // Case-insensitive duplicate check
+    const inputLower = trimmedInput.toLowerCase()
+    const isDuplicate = allergies.some(allergy => allergy.toLowerCase() === inputLower)
+    
+    if (isDuplicate) {
+      alert(`"${trimmedInput}" is already in your allergies list.`)
+      return
+    }
+    
+    // Add the allergy (capitalize first letter of each word)
+    const formattedAllergy = trimmedInput
+      .split(' ')
+      .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+      .join(' ')
+    
+    setAllergies([...allergies, formattedAllergy])
+    setAllergyInput('')
+  }
+
+  const handleAddAllergyKeyDown = (e) => {
+    if (e.key === 'Enter') {
+      handleAddAllergy(e)
     }
   }
 
@@ -52,16 +109,68 @@ function UserProfile() {
   }
 
   // Save handlers
-  const handleSaveAllergies = () => {
-    // TODO: Implement API call
-    console.log('Saving allergies:', allergies)
-    alert('Allergies saved successfully!')
+  const handleSaveAllergies = async () => {
+    const token = localStorage.getItem('token')
+    if (!token) {
+      alert('You must be logged in to save allergies')
+      return
+    }
+    
+    setSavingAllergies(true)
+    try {
+      const response = await fetch('http://localhost:8000/api/user/profile/allergies', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ allergies })
+      })
+      
+      if (response.ok) {
+        alert('Allergies saved successfully!')
+      } else {
+        const data = await response.json()
+        alert(data.detail || 'Failed to save allergies')
+      }
+    } catch (err) {
+      console.error('Error saving allergies:', err)
+      alert('Error saving allergies. Please try again.')
+    } finally {
+      setSavingAllergies(false)
+    }
   }
 
-  const handleSaveGoals = () => {
-    // TODO: Implement API call
-    console.log('Saving dietary goals:', dietaryGoals)
-    alert('Dietary goals saved successfully!')
+  const handleSaveGoals = async () => {
+    const token = localStorage.getItem('token')
+    if (!token) {
+      alert('You must be logged in to save dietary goals')
+      return
+    }
+    
+    setSavingGoals(true)
+    try {
+      const response = await fetch('http://localhost:8000/api/user/profile/dietary-goals', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ dietary_goals: dietaryGoals })
+      })
+      
+      if (response.ok) {
+        alert('Dietary goals saved successfully!')
+      } else {
+        const data = await response.json()
+        alert(data.detail || 'Failed to save dietary goals')
+      }
+    } catch (err) {
+      console.error('Error saving dietary goals:', err)
+      alert('Error saving dietary goals. Please try again.')
+    } finally {
+      setSavingGoals(false)
+    }
   }
 
   const handleSaveNotifications = () => {
@@ -135,19 +244,45 @@ function UserProfile() {
                       </button>
                     </div>
                   ))}
-                  <input
-                    type="text"
-                    className="allergy-input"
-                    placeholder="Type an allergy..."
-                    value={allergyInput}
-                    onChange={(e) => setAllergyInput(e.target.value)}
-                    onKeyDown={handleAddAllergy}
-                  />
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1 }}>
+                    <input
+                      type="text"
+                      className="allergy-input"
+                      placeholder="Type an allergy and press Enter or click Add..."
+                      value={allergyInput}
+                      onChange={(e) => setAllergyInput(e.target.value)}
+                      onKeyDown={handleAddAllergyKeyDown}
+                      style={{ flex: 1 }}
+                    />
+                    <button
+                      type="button"
+                      onClick={handleAddAllergy}
+                      style={{
+                        padding: '6px 12px',
+                        backgroundColor: '#16a34a',
+                        color: 'white',
+                        border: 'none',
+                        borderRadius: '4px',
+                        cursor: 'pointer',
+                        fontSize: '0.875rem',
+                        fontWeight: '500'
+                      }}
+                      onMouseEnter={(e) => e.target.style.backgroundColor = '#15803d'}
+                      onMouseLeave={(e) => e.target.style.backgroundColor = '#16a34a'}
+                    >
+                      Add
+                    </button>
+                  </div>
                 </div>
               </div>
               <div className="profile-card-actions">
-                <button className="btn-save" onClick={handleSaveAllergies}>
-                  Save Allergies
+                <button 
+                  className="btn-save" 
+                  onClick={handleSaveAllergies}
+                  disabled={savingAllergies || loadingAllergies}
+                  style={{ opacity: (savingAllergies || loadingAllergies) ? 0.6 : 1 }}
+                >
+                  {savingAllergies ? 'Saving...' : 'Save Allergies'}
                 </button>
               </div>
             </div>
@@ -172,8 +307,13 @@ function UserProfile() {
                 ))}
               </div>
               <div className="profile-card-actions">
-                <button className="btn-save" onClick={handleSaveGoals}>
-                  Save Goals
+                <button 
+                  className="btn-save" 
+                  onClick={handleSaveGoals}
+                  disabled={savingGoals}
+                  style={{ opacity: savingGoals ? 0.6 : 1 }}
+                >
+                  {savingGoals ? 'Saving...' : 'Save Goals'}
                 </button>
               </div>
             </div>

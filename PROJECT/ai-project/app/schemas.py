@@ -1,6 +1,6 @@
 from pydantic import BaseModel, EmailStr
 from datetime import datetime
-from typing import Optional
+from typing import Optional, List
 
 class UserCreate(BaseModel):
     username: str
@@ -37,6 +37,20 @@ class InventoryItemRead(BaseModel):
     category: Optional[str]
     user_id: int
     created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+# User Profile schemas
+class UserAllergiesUpdate(BaseModel):
+    allergies: List[str]
+
+class UserDietaryGoalsUpdate(BaseModel):
+    dietary_goals: List[str]
+
+class UserProfileRead(BaseModel):
+    allergies: List[str]
+    dietary_goals: List[str]
 
     class Config:
         from_attributes = True

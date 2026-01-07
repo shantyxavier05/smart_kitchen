@@ -413,6 +413,10 @@ async def generate_meal_plan(
         
         db_helper = DatabaseHelper(db, current_user.id)
         
+                # Get user allergies to exclude from recipe
+        user_allergies = current_user.get_allergies() if hasattr(current_user, 'get_allergies') else []
+        logger.info(f"User allergies: {user_allergies}")
+        
         # Get current inventory to add to trace
         inventory = db_helper.get_all_inventory()
         logger.info(f"User has {len(inventory)} items in inventory")
@@ -471,6 +475,9 @@ async def generate_meal_plan(
                 # For the command field, use a simple "suggest a recipe" since command_type is already set
                 command = "suggest a recipe"
                 
+                # Get user allergies to exclude from recipe
+                user_allergies = current_user.get_allergies() if hasattr(current_user, 'get_allergies') else []
+                
                 initial_state: ShoppingAssistantState = {
                     "command": command,
                     "command_type": "recipe",  # Directly set to recipe to bypass voice router
@@ -481,6 +488,7 @@ async def generate_meal_plan(
                     "servings": request.servings,
                     "recipe_name": None,
                     "inventory_usage": request.inventory_usage or "strict",
+                    "allergies": user_allergies,  # Include user allergies in state
                     "inventory": [],
                     "recipe": None,
                     "shopping_list": [],
@@ -521,6 +529,10 @@ async def generate_meal_plan(
         from .agents.planner_agent import PlannerAgent
         planner_agent = PlannerAgent(db_helper)
         
+        # Get user allergies to exclude from recipe
+        user_allergies = current_user.get_allergies() if hasattr(current_user, 'get_allergies') else []
+        logger.info(f"User allergies: {user_allergies}")
+        
         # Use user's exact preferences - don't modify their specific dish request
         preferences_str = request.preferences or ""
         
@@ -528,7 +540,12 @@ async def generate_meal_plan(
         if request.cuisine and not preferences_str:
             preferences_str = f"{request.cuisine} cuisine"
         
-        recipe = planner_agent.suggest_recipe(preferences_str, request.servings, request.inventory_usage or "strict")
+        recipe = planner_agent.suggest_recipe(
+            preferences_str, 
+            request.servings, 
+            request.inventory_usage or "strict",
+            allergies=user_allergies
+        )
         
         logger.info(f"Meal plan generated via direct agent: {recipe.get('name', 'Unknown')}")
         return {
@@ -886,3 +903,61 @@ async def confirm_meal_plan(
     except Exception as e:
         logger.error(f"Error confirming meal plan: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error confirming meal plan: {str(e)}")
+
+# User Profile endpoints
+@app.get("/api/user/profile")
+async def get_user_profile(
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Get user profile including allergies and dietary goals"""
+    try:
+        return {
+            "allergies": current_user.get_allergies() if hasattr(current_user, 'get_allergies') else [],
+            "dietary_goals": current_user.get_dietary_goals() if hasattr(current_user, 'get_dietary_goals') else []
+        }
+    except Exception as e:
+        logger.error(f"Error getting user profile: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error getting user profile: {str(e)}")
+
+@app.put("/api/user/profile/allergies")
+async def update_user_allergies(
+    request: schemas.UserAllergiesUpdate,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Update user allergies"""
+    try:
+        current_user.set_allergies(request.allergies)
+        db.commit()
+        db.refresh(current_user)
+        logger.info(f"Updated allergies for user {current_user.id}: {request.allergies}")
+        return {
+            "message": "Allergies updated successfully",
+            "allergies": current_user.get_allergies()
+        }
+    except Exception as e:
+        logger.error(f"Error updating allergies: {str(e)}", exc_info=True)
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error updating allergies: {str(e)}")
+
+@app.put("/api/user/profile/dietary-goals")
+async def update_user_dietary_goals(
+    request: schemas.UserDietaryGoalsUpdate,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Update user dietary goals"""
+    try:
+        current_user.set_dietary_goals(request.dietary_goals)
+        db.commit()
+        db.refresh(current_user)
+        logger.info(f"Updated dietary goals for user {current_user.id}: {request.dietary_goals}")
+        return {
+            "message": "Dietary goals updated successfully",
+            "dietary_goals": current_user.get_dietary_goals()
+        }
+    except Exception as e:
+        logger.error(f"Error updating dietary goals: {str(e)}", exc_info=True)
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error updating dietary goals: {str(e)}")
