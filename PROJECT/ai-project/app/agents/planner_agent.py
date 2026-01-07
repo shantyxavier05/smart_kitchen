@@ -1,3 +1,4 @@
+
 """
 Planner Agent: Suggests recipes based on available ingredients using LLM
 """
@@ -181,70 +182,13 @@ class PlannerAgent:
             for item in inventory
         ])
         
-        # Build inventory constraint instruction based on usage mode
-        if inventory_usage == "strict":
-            inventory_constraint = """
-INVENTORY CONSTRAINT - STRICT MODE:
-You should prioritize using ingredients from the available inventory list below.
-
-Available inventory items:
-{inventory_items}
-
-🚨 CRITICAL RULE - AUTHENTICITY OVER INVENTORY 🚨
-If the user requested a specific dish (like "tea", "paneer butter masala", etc.):
-
-1. FIRST PRIORITY: Recipe must be AUTHENTIC to the requested dish
-2. SECOND PRIORITY: Use inventory items that actually belong in that dish
-3. NEVER add inventory items that don't belong in the dish just to use them up
-
-SPECIFIC INSTRUCTIONS:
-- If inventory has the RIGHT ingredients for the dish → Use them
-- If inventory has SOME right ingredients → Use those, mention missing ones in description
-- If inventory has WRONG ingredients → DO NOT force them into the recipe!
-
-EXAMPLE - User asks for "tea":
-- ✅ Use from inventory: tea powder, water, milk, sugar (if available)
-- ✅ Can add: ginger, cardamom (authentic tea spices)
-- ❌ DO NOT add: butter, chilly powder, garam masala, coriander, tomatoes (these don't belong in tea!)
-
-EXAMPLE - User asks for "paneer butter masala":
-- ✅ Use from inventory: paneer, butter, tomatoes, cream, onions, spices
-- ❌ DO NOT add: tea powder, unrelated vegetables, meat (if they asked for paneer!)
-
-🔴 BOTTOM LINE: Authenticity of the requested dish is MORE IMPORTANT than using all inventory items!
-""".format(inventory_items=", ".join([item['name'] for item in inventory]))
-        else:  # inventory_usage == "main"
-            inventory_constraint = """
-INVENTORY USAGE INSTRUCTION - FLEXIBLE MODE:
-The ingredients listed in the inventory can be used as MAIN ingredients in your recipe.
-
-Available inventory:
-{inventory_items}
-
-YOU MAY ADD INGREDIENTS that are needed for authentic recipes:
-- Common basics: water, salt, sugar, oil, butter
-- Authentic spices and seasonings needed for the dish
-- Any ingredient essential for making the requested dish properly
-
-RULES:
-1. If the user requested a specific dish (like "tea", "biryani", etc.), create an AUTHENTIC recipe for that dish
-2. Use inventory items that fit the dish
-3. Add any missing essential ingredients for authenticity
-4. DO NOT force inventory items that don't belong in the dish
-
-EXAMPLE - User asks for "tea" with inventory containing butter, chilly powder:
-- ✅ Create authentic tea: tea powder, water, milk, sugar (add these even if not in inventory)
-- ✅ Add authentic tea spices: ginger, cardamom (add if needed for good tea)
-- ❌ DO NOT force: butter, chilly powder (these don't belong in tea)
-
-The goal is to create an AUTHENTIC, DELICIOUS recipe - not to randomly use inventory items!
-""".format(inventory_items=", ".join([item['name'] for item in inventory]))
+        # Get inventory item names for the constraint section
+        inventory_item_names = ", ".join([item['name'] for item in inventory])
         
         # Build allergies exclusion section
         allergies_section = ""
         if allergies and len(allergies) > 0:
             allergies_list = ", ".join(allergies)
-            
             allergies_section = f"""
 🚨🚨🚨 CRITICAL - ALLERGY RESTRICTIONS - HIGHEST PRIORITY 🚨🚨🚨
 The user has the following allergies that MUST be completely excluded from the recipe:
@@ -253,142 +197,309 @@ The user has the following allergies that MUST be completely excluded from the r
 ⚠️⚠️⚠️ THIS IS A SAFETY CRITICAL REQUIREMENT - ALLERGIES CAN BE LIFE-THREATENING ⚠️⚠️⚠️
 
 ABSOLUTE REQUIREMENTS (NO EXCEPTIONS - APPLIES TO ALL RECIPES):
+
 1. DO NOT include ANY of these allergens in the recipe ingredients: {allergies_list}
+
 2. DO NOT use ingredients that contain these allergens or their variations
+
 3. DO NOT use ingredients that might contain traces of these allergens
+
 4. DO NOT suggest substitutes that might contain these allergens
+
 5. If the requested dish typically contains these allergens, you MUST create an allergy-safe alternative version
+
 6. Check ALL ingredients for potential allergen contamination (including oils, sauces, seasonings, and garnishes)
+
 7. Review the COMPLETE ingredient list BEFORE returning the recipe to ensure NO allergens are present
 
 GENERAL RULES FOR ANY ALLERGY:
+
 - If user is allergic to "X" → DO NOT use: X, X oil, X butter, X sauce, or any variation of X
+
 - If user is allergic to "X" → DO NOT use ingredients that commonly contain X
+
 - If user is allergic to "X" → Check all ingredients including: oils, sauces, seasonings, garnishes, toppings
+
 - If the requested dish traditionally uses X → Create an allergy-safe version without X
-- The recipe name can remain the same, but it MUST be X-free
-- Mention in the description that this is an allergy-safe version
+
+- The recipe name MUST NOT contain the allergen name (e.g., if allergic to chicken, do NOT name it "chicken biryani" - name it "Biryani" or "Vegetable Biryani" instead)
+
+- The description MUST NOT mention the allergen at all (e.g., do NOT say "chicken biryani without chicken" - just describe it as "biryani" or "vegetable biryani")
+
+- DO NOT mention in the description that allergens were excluded - just describe the dish naturally without referencing the allergen
 
 EXAMPLES (These principles apply to ANY allergy and ANY recipe):
+
 - If allergic to "Peanuts" → DO NOT use: peanuts, peanut oil, peanut butter, groundnuts, or any peanut-containing ingredient
   → For ANY recipe (Pad Thai, Satay, etc.): Use safe alternatives or omit entirely
+
 - If allergic to "Shellfish" → DO NOT use: shrimp, prawns, crab, lobster, or any seafood
   → For ANY recipe (Paella, Seafood Pasta, etc.): Use safe alternatives or omit entirely
+
 - If allergic to "Dairy" → DO NOT use: milk, cheese, butter, cream, yogurt, or any dairy product
   → For ANY recipe (Mac and Cheese, Alfredo, etc.): Use dairy-free alternatives
+
 - If allergic to "Eggs" → DO NOT use: eggs, egg whites, egg yolks, or any egg-containing ingredient
   → For ANY recipe (Cake, Omelet, etc.): Use egg-free alternatives
+
 - If allergic to "Gluten" → DO NOT use: wheat, barley, rye, or any gluten-containing ingredient
   → For ANY recipe (Pasta, Bread, etc.): Use gluten-free alternatives
+
 - If allergic to "Soy" → DO NOT use: soy, soy sauce, tofu, or any soy-containing ingredient
   → For ANY recipe: Use soy-free alternatives
 
 ⚠️⚠️⚠️ SAFETY FIRST: Allergies can be life-threatening. NEVER include allergens in the recipe, even in small amounts, as "optional" ingredients, or as garnishes! ⚠️⚠️⚠️
 
 BEFORE RETURNING THE RECIPE, VERIFY:
+
 - None of the ingredients contain: {allergies_list}
+
 - None of the ingredients are variations or derivatives of: {allergies_list}
+
+- The recipe name does NOT contain any allergen names (e.g., if allergic to chicken, do NOT use "chicken biryani" in the name)
+
+- The description does NOT mention any allergens (e.g., do NOT say "chicken biryani without chicken" - just describe it naturally)
+
 - The recipe is completely safe for someone with these allergies
-- If the dish traditionally uses these allergens, you've created an allergy-safe alternative
-- The description mentions it's an allergy-safe version if applicable
+
+- If the dish traditionally uses these allergens, you've created an allergy-safe alternative without mentioning the allergen in the name or description
+
 """
         
+        # Build inventory constraint instruction based on usage mode
+        if inventory_usage == "strict":
+            inventory_constraint = f"""
+INVENTORY CONSTRAINT - STRICT MODE:
+
+You should prioritize using ingredients from the available inventory list below.
+
+Available inventory items:
+
+{inventory_item_names}
+
+🚨 CRITICAL RULE - AUTHENTICITY OVER INVENTORY 🚨
+
+If the user requested a specific dish (like "tea", "paneer butter masala", etc.):
+
+1. FIRST PRIORITY: Recipe must be AUTHENTIC to the requested dish
+
+2. SECOND PRIORITY: Use inventory items that actually belong in that dish
+
+3. NEVER add inventory items that don't belong in the dish just to use them up
+
+SPECIFIC INSTRUCTIONS:
+
+- If inventory has the RIGHT ingredients for the dish → Use them
+
+- If inventory has SOME right ingredients → Use those, mention missing ones in description
+
+- If inventory has WRONG ingredients → DO NOT force them into the recipe!
+
+EXAMPLE - User asks for "tea":
+
+- ✅ Use from inventory: tea powder, water, milk, sugar (if available)
+
+- ✅ Can add: ginger, cardamom (authentic tea spices)
+
+- ❌ DO NOT add: butter, chilly powder, garam masala, coriander, tomatoes (these don't belong in tea!)
+
+EXAMPLE - User asks for "paneer butter masala":
+
+- ✅ Use from inventory: paneer, butter, tomatoes, cream, onions, spices
+
+- ❌ DO NOT add: tea powder, unrelated vegetables, meat (if they asked for paneer!)
+
+🔴 BOTTOM LINE: Authenticity of the requested dish is MORE IMPORTANT than using all inventory items!
+
+"""
+        else:  # inventory_usage == "main"
+            inventory_constraint = f"""
+INVENTORY USAGE INSTRUCTION - FLEXIBLE MODE:
+
+The ingredients listed in the inventory can be used as MAIN ingredients in your recipe.
+
+Available inventory:
+
+{inventory_item_names}
+
+YOU MAY ADD INGREDIENTS that are needed for authentic recipes:
+
+- Common basics: water, salt, sugar, oil, butter
+
+- Authentic spices and seasonings needed for the dish
+
+- Any ingredient essential for making the requested dish properly
+
+RULES:
+
+1. If the user requested a specific dish (like "tea", "biryani", etc.), create an AUTHENTIC recipe for that dish
+
+2. Use inventory items that fit the dish
+
+3. Add any missing essential ingredients for authenticity
+
+4. DO NOT force inventory items that don't belong in the dish
+
+EXAMPLE - User asks for "tea" with inventory containing butter, chilly powder:
+
+- ✅ Create authentic tea: tea powder, water, milk, sugar (add these even if not in inventory)
+
+- ✅ Add authentic tea spices: ginger, cardamom (add if needed for good tea)
+
+- ❌ DO NOT force: butter, chilly powder (these don't belong in tea)
+
+The goal is to create an AUTHENTIC, DELICIOUS recipe - not to randomly use inventory items!
+
+"""
+        
+        # Build the main prompt with exact structure
         prompt = f"""Generate a detailed recipe based on the following available ingredients and requirements.
 
+
+
 🚫 SAFETY WARNING - ABSOLUTE PROHIBITIONS:
+
 You MUST NOT create recipes containing:
+
 - Human meat, flesh, or body parts
+
 - Pets (dogs, cats, etc.)
+
 - Endangered or protected animals
+
 - Toxic, poisonous, or harmful substances
+
 - Inedible items (plastic, metal, dirt, etc.)
+
 - Illegal drugs or dangerous substances
+
 - Any unethical, harmful, or inappropriate ingredients
 
 ONLY create recipes with legitimate, safe, edible food ingredients that are culturally appropriate and ethical.
 
 {allergies_section}
-
 Available ingredients in inventory:
+
 {inventory_text}
 
-{inventory_constraint}
+{inventory_constraint}Requirements:
 
-Requirements:
 - Number of servings: {servings}
 """
         
         if preferences:
-            # Emphasize that preferences should be treated as the exact dish name
             prompt += f"""
 - REQUESTED DISH: "{preferences}"
 
 🚨 CRITICAL INSTRUCTION - DISH NAME ACCURACY 🚨
+
 The user has specifically requested to make "{preferences}". 
+
 This is the EXACT dish they want - you MUST NOT change, substitute, or create a different dish.
 
 ⚠️ AUTHENTICITY IS MANDATORY ⚠️
+
 You MUST create an AUTHENTIC, TRADITIONAL recipe for "{preferences}".
+
 ONLY include ingredients that ACTUALLY BELONG in "{preferences}".
 
 DO NOT add random ingredients just because they are in inventory!
 
 EXAMPLES OF WHAT NOT TO DO:
+
 ❌ User asks for "tea" → You add butter, chilly powder, garam masala (WRONG! Tea doesn't need these!)
+
 ❌ User asks for "tea" → You add coriander, tomatoes (WRONG! These don't belong in tea!)
+
 ❌ User asks for "paneer butter masala" → You give "chicken butter masala" (WRONG - they asked for paneer!)
+
 ❌ User asks for "tea" → You give "tea with meat" (WRONG - tea doesn't have meat!)
 
 WHAT YOU MUST DO:
+
 ✅ If they ask for "tea" → ONLY use: tea leaves/powder, water, milk (optional), sugar (optional), and authentic tea spices like cardamom, ginger, cinnamon (NOT random spices!)
+
 ✅ If they ask for "paneer butter masala" → ONLY use: paneer, butter, tomatoes, cream, onions, garlic, ginger, and authentic Indian spices for this dish
+
 ✅ If they ask for "biryani" → ONLY use ingredients that belong in biryani
 
 🔴 IRON RULE: If an ingredient from inventory does NOT belong in the traditional "{preferences}" recipe, DO NOT USE IT - even if it's available!
 
 Examples for TEA specifically:
+
 - ✅ Authentic tea ingredients: tea leaves/powder, water, milk, sugar, cardamom, ginger, cloves, cinnamon
+
 - ❌ DO NOT add to tea: butter, chilly powder, garam masala, coriander, tomatoes, meat, vegetables, cheese, etc.
 
 THE DISH NAME IN YOUR RECIPE MUST MATCH OR CLOSELY RELATE TO: "{preferences}"
 
 Stay 100% authentic to the requested dish. IGNORE inventory items that don't belong in "{preferences}".
+
 """
         
         prompt += """
 Please generate a complete recipe with:
-1. A recipe name that matches the requested dish (if specified)
-2. A brief description of the dish
+
+1. A recipe name that matches the requested dish (if specified) - this name will be used as the title, so make it a proper dish name (e.g., "Vegetable Biryani", "Paneer Butter Masala", NOT "Recipe" or "Meal Plan")
+
+2. A brief description of the dish (do NOT mention any allergens in the description - describe the dish naturally without referencing excluded ingredients)
+
 3. A list of ingredients with exact quantities needed (scaled appropriately for the number of servings)
+
 4. Step-by-step cooking instructions
 
 Important:
+
 - If a specific dish name was requested, the recipe MUST be for that exact dish - no substitutions or creative variations
+
 - If dietary preferences are specified (e.g., vegetarian, vegan, gluten-free, low-carb), STRICTLY ADHERE to them
+
 - For vegetarian: exclude all meat, poultry, and seafood
+
 - For vegan: exclude all animal products (meat, dairy, eggs, honey)
+
 - For gluten-free: exclude wheat, barley, rye, and their derivatives
+
 - Dietary preferences override inventory suggestions - never include ingredients that violate dietary restrictions
+
 - Scale ingredient quantities appropriately for the number of servings requested
+
 - Make sure the recipe is practical and can be made with the constraints specified above
+
 - If a cuisine type is specified, make the recipe authentic to that cuisine
+
 - Include all necessary cooking steps in detail
+
 - Be accurate and authentic to traditional recipes
 
 Respond with a JSON object in this exact format:
+
 {
+
   "name": "Recipe Name",
+
   "description": "Brief description of the dish",
+
   "servings": <number>,
+
   "ingredients": [
+
     {"name": "ingredient name", "quantity": <number>, "unit": "unit"}
+
   ],
+
   "instructions": [
+
     "Step 1 description",
+
     "Step 2 description",
+
     ...
+
   ]
+
 }
+
 """
         
         return prompt
