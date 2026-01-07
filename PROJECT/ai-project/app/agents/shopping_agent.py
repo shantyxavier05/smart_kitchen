@@ -5,6 +5,7 @@ import logging
 from typing import Dict, List
 
 from app.database_helper import DatabaseHelper
+from app.llm.llm_client import LLMClient
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +19,7 @@ class ShoppingAgent:
     def __init__(self, db_helper: DatabaseHelper):
         self.db_helper = db_helper
         self.thresholds: Dict[str, float] = {}
+        self.llm_client = LLMClient()  # Initialize LLM client for parsing ingredients
     
     def generate_shopping_list(self) -> List[Dict]:
         """
@@ -77,6 +79,28 @@ class ShoppingAgent:
         except Exception as e:
             logger.error(f"Error updating threshold: {str(e)}")
             raise
+    
+    def parse_ingredients_with_llm(self, ingredients: List[Dict]) -> List[Dict]:
+        """
+        Parse meal plan ingredients using LLM to expand generic items into specific ones.
+        For example, "vegetables (tomato or potato)" becomes separate "tomato" and "potato" items.
+        
+        Args:
+            ingredients: List of ingredient dictionaries with name, quantity, unit
+            
+        Returns:
+            List of parsed ingredient dictionaries with specific item names
+        """
+        try:
+            logger.info(f"Parsing {len(ingredients)} ingredients with LLM to expand generic items")
+            parsed_ingredients = self.llm_client.parse_meal_plan_ingredients(ingredients)
+            logger.info(f"LLM parsed {len(ingredients)} ingredients into {len(parsed_ingredients)} specific items")
+            return parsed_ingredients
+        except Exception as e:
+            logger.error(f"Error parsing ingredients with LLM: {str(e)}")
+            # Return original ingredients if parsing fails
+            logger.warning("Falling back to original ingredients without LLM parsing")
+            return ingredients
 
 
 

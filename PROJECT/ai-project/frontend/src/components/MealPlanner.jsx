@@ -35,21 +35,29 @@ function MealPlanner() {
     }
 
     try {
-      console.log('Generating meal plan with:', { searchQuery, inventoryUsage })
+      console.log('Generating meal plan with:', { searchQuery, dietaryPreferences, inventoryUsage })
       
       // Build preferences string
-      // Priority: If user typed a specific dish (searchQuery), use that as the main preference
-      // Otherwise, combine cuisine and dietary preferences
+      // Combine specific dish request with dietary preferences
       let preferences = ''
       
       if (searchQuery) {
-        // User specified a dish - use it as-is (highest priority)
+        // User specified a dish - use it as the main preference
         preferences = searchQuery.trim()
-      } else {
-        // No specific dish - combine other preferences
-        if (dietaryPreferences) preferences += `${dietaryPreferences}. `
-        // Don't add cuisine to preferences here - it's sent separately
       }
+      
+      // ALWAYS add dietary preferences if provided, whether or not there's a specific dish
+      if (dietaryPreferences && dietaryPreferences.trim()) {
+        if (preferences) {
+          // Combine with existing preferences (dish name)
+          preferences += `. Dietary preferences: ${dietaryPreferences.trim()}`
+        } else {
+          // No specific dish, just dietary preferences
+          preferences = dietaryPreferences.trim()
+        }
+      }
+      
+      // Don't add cuisine to preferences here - it's sent separately
       
       const response = await fetch('http://localhost:8000/api/meal-plan/generate', {
         method: 'POST',

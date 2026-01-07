@@ -303,6 +303,11 @@ Please generate a complete recipe with:
 
 Important:
 - If a specific dish name was requested, the recipe MUST be for that exact dish - no substitutions or creative variations
+- If dietary preferences are specified (e.g., vegetarian, vegan, gluten-free, low-carb), STRICTLY ADHERE to them
+- For vegetarian: exclude all meat, poultry, and seafood
+- For vegan: exclude all animal products (meat, dairy, eggs, honey)
+- For gluten-free: exclude wheat, barley, rye, and their derivatives
+- Dietary preferences override inventory suggestions - never include ingredients that violate dietary restrictions
 - Scale ingredient quantities appropriately for the number of servings requested
 - Make sure the recipe is practical and can be made with the constraints specified above
 - If a cuisine type is specified, make the recipe authentic to that cuisine

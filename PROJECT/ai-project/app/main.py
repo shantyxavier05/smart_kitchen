@@ -650,11 +650,20 @@ async def confirm_meal_plan(
 ):
     """
     Confirm a meal plan:
+    - Parse ingredients with LLM to expand generic items (e.g., "vegetables (tomato or potato)" -> "tomato", "potato")
     - Items in inventory: reduce quantity (delete if reaches 0)
     - Items NOT in inventory: add to shopping list
     """
     try:
         db_helper = DatabaseHelper(db, current_user.id)
+        
+        # Parse ingredients with LLM to expand generic items into specific ones
+        from .agents.shopping_agent import ShoppingAgent
+        shopping_agent = ShoppingAgent(db_helper)
+        
+        logger.info(f"Parsing {len(request.ingredients)} ingredients with LLM to expand generic items")
+        parsed_ingredients = shopping_agent.parse_ingredients_with_llm(request.ingredients)
+        logger.info(f"LLM parsed ingredients into {len(parsed_ingredients)} specific items")
         
         # Get current inventory
         inventory = db_helper.get_all_inventory()
@@ -664,9 +673,9 @@ async def confirm_meal_plan(
         items_reduced_from_inventory = []
         items_deleted_from_inventory = []
         
-        logger.info(f"Confirming meal plan with {len(request.ingredients)} ingredients")
+        logger.info(f"Processing {len(parsed_ingredients)} parsed ingredients")
         
-        for ingredient in request.ingredients:
+        for ingredient in parsed_ingredients:
             ingredient_name = ingredient.get('name', '').strip()
             ingredient_quantity = ingredient.get('quantity', 0)
             ingredient_unit = ingredient.get('unit', 'units')
@@ -854,12 +863,15 @@ async def confirm_meal_plan(
             from opik import opik_context
             opik_context.update_current_trace(
                 metadata={
-                    "total_ingredients_processed": len(request.ingredients),
+                    "original_ingredients_count": len(request.ingredients),
+                    "parsed_ingredients_count": len(parsed_ingredients),
+                    "total_ingredients_processed": len(parsed_ingredients),
                     "shopping_list_additions": len(items_added_to_shopping_list),
                     "inventory_reductions": len(items_reduced_from_inventory),
-                    "inventory_deletions": len(items_deleted_from_inventory)
+                    "inventory_deletions": len(items_deleted_from_inventory),
+                    "llm_parsing_enabled": True
                 },
-                tags=["meal-plan-confirm", "inventory-update", "shopping-list-update"]
+                tags=["meal-plan-confirm", "inventory-update", "shopping-list-update", "llm-parsing"]
             )
         except Exception as e:
             logger.warning(f"Could not update trace metadata: {e}")
