@@ -57,12 +57,22 @@ app.add_middleware(
 # Auth endpoints (keep existing)
 @app.post("/api/auth/signup", response_model=schemas.UserRead, status_code=status.HTTP_201_CREATED)
 def signup(user: schemas.UserCreate, db: Session = Depends(get_db)):
+    # Check if email is already registered
     db_user = crud.get_user_by_email(db, email=user.email)
     if db_user:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Email already registered"
         )
+    
+    # Check if username is already taken
+    db_username = crud.get_user_by_username(db, username=user.username)
+    if db_username:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Username already taken. Please choose a different username."
+        )
+    
     return crud.create_user(db=db, user=user)
 
 @app.post("/api/auth/login", response_model=schemas.Token)
@@ -737,6 +747,7 @@ async def confirm_meal_plan(
                     # Check if units match (more flexible matching)
                     inv_unit = inventory_item.get('unit', 'units').lower().strip()
                     ing_unit = ingredient_unit.lower().strip()
+                    old_quantity = inventory_item['quantity']  # MOVED HERE - need this before conversions
                     
                     # Normalize common unit variations
                     unit_aliases = {
@@ -752,8 +763,30 @@ async def confirm_meal_plan(
                         'l': ['liter', 'liters', 'l', 'litre', 'litres']
                     }
                     
+                    # Unit conversion factors (to base unit)
+                    # Weight conversions (base: grams)
+                    weight_to_grams = {
+                        'g': 1, 'gram': 1, 'grams': 1,
+                        'kg': 1000, 'kilogram': 1000, 'kilograms': 1000,
+                        'mg': 0.001, 'milligram': 0.001, 'milligrams': 0.001,
+                        'lb': 453.592, 'pound': 453.592, 'pounds': 453.592, 'lbs': 453.592,
+                        'oz': 28.3495, 'ounce': 28.3495, 'ounces': 28.3495
+                    }
+                    
+                    # Volume conversions (base: milliliters)
+                    volume_to_ml = {
+                        'ml': 1, 'milliliter': 1, 'milliliters': 1, 'millilitre': 1, 'millilitres': 1,
+                        'l': 1000, 'liter': 1000, 'liters': 1000, 'litre': 1000, 'litres': 1000,
+                        'cup': 236.588, 'cups': 236.588, 'c': 236.588,
+                        'tbsp': 14.787, 'tablespoon': 14.787, 'tablespoons': 14.787, 'tbs': 14.787,
+                        'tsp': 4.929, 'teaspoon': 4.929, 'teaspoons': 4.929
+                    }
+                    
                     # Check if units match
                     units_match = False
+                    converted_qty_needed = qty_needed  # This will hold the converted quantity
+                    converted_inv_qty = old_quantity  # This will hold the converted inventory quantity
+                    
                     if inv_unit == ing_unit:
                         units_match = True
                     else:
@@ -762,6 +795,34 @@ async def confirm_meal_plan(
                             if inv_unit in aliases and ing_unit in aliases:
                                 units_match = True
                                 break
+                        
+                        # If not in same alias group, try unit conversion
+                        if not units_match:
+                            # Try weight conversion (e.g., kg to g)
+                            if inv_unit in weight_to_grams and ing_unit in weight_to_grams:
+                                # Convert both to grams for comparison
+                                inv_qty_in_grams = old_quantity * weight_to_grams[inv_unit]
+                                ing_qty_in_grams = qty_needed * weight_to_grams[ing_unit]
+                                
+                                # Compare in grams
+                                converted_qty_needed = ing_qty_in_grams / weight_to_grams[inv_unit]
+                                converted_inv_qty = old_quantity
+                                units_match = True
+                                logger.info(f"Weight conversion: {old_quantity} {inv_unit} = {inv_qty_in_grams}g, need {ing_qty_in_grams}g ({qty_needed} {ing_unit})")
+                                logger.info(f"To deduct from inventory: {converted_qty_needed} {inv_unit}")
+                            
+                            # Try volume conversion (e.g., l to ml)
+                            elif inv_unit in volume_to_ml and ing_unit in volume_to_ml:
+                                # Convert both to ml for comparison
+                                inv_qty_in_ml = old_quantity * volume_to_ml[inv_unit]
+                                ing_qty_in_ml = qty_needed * volume_to_ml[ing_unit]
+                                
+                                # Compare in ml
+                                converted_qty_needed = ing_qty_in_ml / volume_to_ml[inv_unit]
+                                converted_inv_qty = old_quantity
+                                units_match = True
+                                logger.info(f"Volume conversion: {old_quantity} {inv_unit} = {inv_qty_in_ml}ml, need {ing_qty_in_ml}ml ({qty_needed} {ing_unit})")
+                                logger.info(f"To deduct from inventory: {converted_qty_needed} {inv_unit}")
                     
                     # Also allow if both are numeric units (units, unit, piece, etc.)
                     if not units_match:
@@ -771,12 +832,10 @@ async def confirm_meal_plan(
                     
                     logger.info(f"Unit matching: '{inv_unit}' vs '{ing_unit}' = {units_match}")
                     
-                    old_quantity = inventory_item['quantity']
-                    
-                    if units_match and old_quantity >= qty_needed:
+                    if units_match and converted_inv_qty >= converted_qty_needed:
                         # We have enough in inventory - just reduce
-                        logger.info(f"Reducing {qty_needed} from {inventory_item['name']} (had {old_quantity})")
-                        db_helper.reduce_quantity(inventory_item['name'], qty_needed)
+                        logger.info(f"Reducing {converted_qty_needed} {inv_unit} from {inventory_item['name']} (had {old_quantity} {inv_unit})")
+                        db_helper.reduce_quantity(inventory_item['name'], converted_qty_needed)
                         
                         # Refresh inventory to get updated state
                         updated_item = db_helper.get_item(inventory_item['name'])
@@ -800,9 +859,9 @@ async def confirm_meal_plan(
                                 "new_quantity": updated_item['quantity'],
                                 "unit": inventory_item['unit']
                             })
-                    elif units_match and old_quantity < qty_needed:
+                    elif units_match and converted_inv_qty < converted_qty_needed:
                         # We don't have enough - reduce what we have and add remainder to shopping list
-                        logger.info(f"Not enough {inventory_item['name']}: need {qty_needed}, have {old_quantity}")
+                        logger.info(f"Not enough {inventory_item['name']}: need {converted_qty_needed} {inv_unit}, have {old_quantity} {inv_unit}")
                         db_helper.reduce_quantity(inventory_item['name'], old_quantity)
                         
                         # Remove from inventory_dict since it's deleted
@@ -815,8 +874,21 @@ async def confirm_meal_plan(
                             "unit": inventory_item['unit']
                         })
                         
+                        # Calculate remaining quantity needed in the RECIPE's unit
+                        # We used all of inventory, so calculate how much more we need in recipe units
+                        if inv_unit in weight_to_grams and ing_unit in weight_to_grams:
+                            # Convert inventory quantity to recipe unit
+                            inv_qty_in_recipe_unit = old_quantity * weight_to_grams[inv_unit] / weight_to_grams[ing_unit]
+                            remaining_qty = qty_needed - inv_qty_in_recipe_unit
+                        elif inv_unit in volume_to_ml and ing_unit in volume_to_ml:
+                            # Convert inventory quantity to recipe unit
+                            inv_qty_in_recipe_unit = old_quantity * volume_to_ml[inv_unit] / volume_to_ml[ing_unit]
+                            remaining_qty = qty_needed - inv_qty_in_recipe_unit
+                        else:
+                            # Same units, simple subtraction
+                            remaining_qty = qty_needed - old_quantity
+                        
                         # Add remaining quantity to shopping list
-                        remaining_qty = qty_needed - old_quantity
                         quantity_str = f"{remaining_qty} {ingredient_unit}" if ingredient_unit != 'units' else str(remaining_qty)
                         db_helper.add_shopping_list_item(ingredient_name, quantity_str)
                         items_added_to_shopping_list.append({

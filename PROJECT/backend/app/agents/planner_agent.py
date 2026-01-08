@@ -787,9 +787,26 @@ This is a DIETARY PREFERENCE. Vegetarians avoid meat and fish but can eat dairy 
         if cuisine:
             prompt_parts.append(f"Cuisine preference: {cuisine} cuisine")
         
-        # Preferences
+        # Preferences (CRITICAL: Specific dish request is HIGHEST PRIORITY)
         if preferences:
-            prompt_parts.append(f"Requested dish: {preferences}")
+            prompt_parts.append(f"""
+🎯🎯🎯 USER'S SPECIFIC REQUEST - HIGHEST PRIORITY 🎯🎯🎯
+Requested dish: {preferences}
+
+CRITICAL INSTRUCTION:
+- If the user has requested a SPECIFIC dish by name (e.g., "chicken biryani", "butter chicken", "fish curry"), you MUST generate that EXACT dish
+- The specific dish name OVERRIDES any dietary preferences
+- For example:
+  • If user requests "chicken biryani" → Generate CHICKEN biryani (even if no dietary preference is specified)
+  • If user requests "mutton curry" → Generate MUTTON curry (with mutton as the main ingredient)
+  • If user requests "fish fry" → Generate FISH fry (with fish as the main ingredient)
+  • If user requests "paneer tikka" → Generate PANEER tikka (vegetarian dish)
+- DO NOT substitute the protein/ingredient mentioned in the dish name
+- If the dish name includes meat (chicken, mutton, fish, prawn, beef, lamb), the recipe MUST include that meat
+- Honor the user's explicit request above all else (except allergies, which are always forbidden)
+
+If the request is vague (e.g., just "biryani" or "curry"), then follow dietary preferences if provided.
+""")
         
         # Servings
         prompt_parts.append(f"Servings: {servings}")

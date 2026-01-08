@@ -10,11 +10,6 @@ function UserProfile() {
   const [loadingAllergies, setLoadingAllergies] = useState(false)
   const [savingAllergies, setSavingAllergies] = useState(false)
   
-  // Dietary goals state
-  const [dietaryGoals, setDietaryGoals] = useState([])
-  const availableDiets = ['Vegetarian', 'Vegan', 'Low-Carb', 'Gluten-Free', 'Keto']
-  const [savingGoals, setSavingGoals] = useState(false)
-  
   
   // Fetch user profile data on component mount
   useEffect(() => {
@@ -33,7 +28,6 @@ function UserProfile() {
         if (response.ok) {
           const data = await response.json()
           setAllergies(data.allergies || [])
-          setDietaryGoals(data.dietary_goals || [])
         }
       } catch (err) {
         console.error('Error fetching user profile:', err)
@@ -84,15 +78,6 @@ function UserProfile() {
     setAllergies(allergies.filter(allergy => allergy !== allergyToRemove))
   }
 
-  // Dietary goals handlers
-  const toggleDietaryGoal = (goal) => {
-    if (dietaryGoals.includes(goal)) {
-      setDietaryGoals(dietaryGoals.filter(g => g !== goal))
-    } else {
-      setDietaryGoals([...dietaryGoals, goal])
-    }
-  }
-
 
   // Save handlers
   const handleSaveAllergies = async () => {
@@ -124,38 +109,6 @@ function UserProfile() {
       alert('Error saving allergies. Please try again.')
     } finally {
       setSavingAllergies(false)
-    }
-  }
-
-  const handleSaveGoals = async () => {
-    const token = localStorage.getItem('token')
-    if (!token) {
-      alert('You must be logged in to save dietary goals')
-      return
-    }
-    
-    setSavingGoals(true)
-    try {
-      const response = await fetch('http://localhost:8000/api/user/profile/dietary-goals', {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({ dietary_goals: dietaryGoals })
-      })
-      
-      if (response.ok) {
-        alert('Dietary goals saved successfully!')
-      } else {
-        const data = await response.json()
-        alert(data.detail || 'Failed to save dietary goals')
-      }
-    } catch (err) {
-      console.error('Error saving dietary goals:', err)
-      alert('Error saving dietary goals. Please try again.')
-    } finally {
-      setSavingGoals(false)
     }
   }
 
@@ -264,37 +217,6 @@ function UserProfile() {
                   style={{ opacity: (savingAllergies || loadingAllergies) ? 0.6 : 1 }}
                 >
                   {savingAllergies ? 'Saving...' : 'Save Allergies'}
-                </button>
-              </div>
-            </div>
-          </div>
-
-          {/* Dietary Goals */}
-          <div className="profile-card">
-            <div className="profile-card-header">
-              <h2 className="profile-card-title">Dietary Goals</h2>
-              <p className="profile-card-description">Select your dietary goals to personalize your meal plans.</p>
-            </div>
-            <div className="profile-card-body">
-              <div className="dietary-goals-grid">
-                {availableDiets.map((diet, index) => (
-                  <button
-                    key={index}
-                    className={`dietary-goal-pill ${dietaryGoals.includes(diet) ? 'active' : ''}`}
-                    onClick={() => toggleDietaryGoal(diet)}
-                  >
-                    {diet}
-                  </button>
-                ))}
-              </div>
-              <div className="profile-card-actions">
-                <button 
-                  className="btn-save" 
-                  onClick={handleSaveGoals}
-                  disabled={savingGoals}
-                  style={{ opacity: savingGoals ? 0.6 : 1 }}
-                >
-                  {savingGoals ? 'Saving...' : 'Save Goals'}
                 </button>
               </div>
             </div>
