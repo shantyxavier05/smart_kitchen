@@ -500,7 +500,7 @@ function MealPlanner() {
                 <label className="inventory-label">Dietary Preferences</label>
                 <input
                   type="text"
-                  placeholder="e.g., vegetarian, vegan, gluten-free"
+                  placeholder="e.g., veg, non-veg"
                   value={dietaryPreferences}
                   onChange={(e) => setDietaryPreferences(e.target.value)}
                   style={{

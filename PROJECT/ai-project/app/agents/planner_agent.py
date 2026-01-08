@@ -337,40 +337,448 @@ BEFORE RETURNING THE RECIPE, VERIFY:
         prompt_parts.append("Note: Only suggest recipes with safe, edible ingredients.")
         
         # 🍽️ DIETARY PREFERENCES - IMPORTANT!
+        # Check specific dietary restrictions FIRST (gluten-free, dairy-free, keto, etc.)
+        # Then check general preferences (veg, non-veg)
         if preferences:
             # Check if preferences contain dietary keywords
             preferences_lower = preferences.lower()
             dietary_instruction = ""
             
-            if "non-veg" in preferences_lower or "non veg" in preferences_lower or "nonveg" in preferences_lower:
+            logger.info(f"🔍 Checking dietary preferences in: '{preferences}'")
+            logger.info(f"🔍 Lowercase version: '{preferences_lower}'")
+            
+            # PRIORITY 1: Specific medical/strict dietary restrictions
+            if "gluten free" in preferences_lower or "gluten-free" in preferences_lower or "glutenfree" in preferences_lower:
+                logger.info("✅ DETECTED: Gluten Free dietary preference")  
                 dietary_instruction = """
-🍖 DIETARY PREFERENCE: NON-VEGETARIAN
-- The user prefers NON-VEGETARIAN dishes
-- MUST include meat, poultry, seafood, or eggs in the recipe
-- DO NOT generate purely vegetarian/vegan dishes
-- Examples: chicken, lamb, fish, shrimp, beef, pork, eggs
-- This is a strong preference - prioritize meat-based dishes
+🌾🌾🌾 CRITICAL DIETARY REQUIREMENT: GLUTEN FREE 🌾🌾🌾
+This is a STRICT medical requirement. DO NOT compromise on this.
+
+❌ ABSOLUTELY FORBIDDEN INGREDIENTS (NEVER USE THESE):
+- Wheat (whole wheat, wheat flour, all-purpose flour, bread flour, cake flour)
+- Barley (barley flour, barley malt, malt vinegar, malt extract)
+- Rye (rye flour, rye bread)
+- Regular bread, buns, rolls, bagels, baguettes
+- Regular pasta (spaghetti, penne, macaroni, noodles)
+- Regular pizza dough
+- Regular flour tortillas
+- Crackers, pretzels, cookies, cakes, pastries (unless specifically gluten-free)
+- Breadcrumbs, panko, croutons
+- Soy sauce (contains wheat - use tamari or gluten-free soy sauce instead)
+- Beer (contains barley)
+- Couscous, bulgur, semolina, farro, spelt
+- Seitan (pure gluten)
+- Regular oats (unless certified gluten-free, due to cross-contamination)
+
+✅ ALLOWED INGREDIENTS (SAFE TO USE):
+Grains & Starches:
+- Rice (white rice, brown rice, basmati rice, jasmine rice, wild rice)
+- Rice noodles, rice vermicelli, rice paper
+- Corn (cornmeal, corn flour, corn tortillas, polenta, grits)
+- Quinoa (all colors)
+- Millet, sorghum, teff
+- Buckwheat (despite the name, it's gluten-free)
+- Certified gluten-free oats
+- Amaranth
+- Gluten-free bread, gluten-free pasta, gluten-free flour blends
+- Potato starch, tapioca starch, arrowroot
+
+Proteins (naturally gluten-free):
+- All fresh meat (beef, pork, lamb, chicken, turkey)
+- All fresh fish and seafood
+- Eggs (all forms)
+- Tofu, tempeh (check that they're plain, not marinated with soy sauce)
+- Beans, lentils, chickpeas (all legumes)
+- Nuts and seeds
+
+Dairy (naturally gluten-free):
+- Milk (all types: whole, skim, 2%)
+- Cheese (plain cheese, not processed cheese spreads)
+- Yogurt (plain, check flavored varieties)
+- Butter, ghee
+- Cream, sour cream
+
+Vegetables & Fruits (all naturally gluten-free):
+- ALL fresh vegetables
+- ALL fresh fruits
+
+Oils & Fats (all naturally gluten-free):
+- Olive oil, vegetable oil, coconut oil, avocado oil
+- Butter, ghee
+
+Condiments & Seasonings (gluten-free versions):
+- Salt, pepper, all pure spices
+- Tamari (gluten-free soy sauce alternative)
+- Rice vinegar, apple cider vinegar, white vinegar
+- Tomato paste, tomato sauce (check label)
+- Mustard (most are gluten-free)
+- Mayonnaise (most are gluten-free)
+
+🔍 RECIPE REQUIREMENTS:
+1. Use ONLY ingredients from the ALLOWED list above
+2. If a recipe traditionally uses flour/bread/pasta, substitute with gluten-free alternatives
+3. For breakfast recipes: use rice, corn, potatoes, eggs, gluten-free bread/oats
+4. For American breakfast: eggs, bacon, sausage (check plain), hash browns, corn tortillas, gluten-free toast
+5. NEVER use regular bread, flour, or pasta
+6. When in doubt, choose naturally gluten-free whole foods (meat, vegetables, rice, corn)
+
+⚠️ VERIFICATION CHECKLIST - Before returning recipe:
+□ No wheat, barley, or rye in ANY ingredient
+□ No regular bread, pasta, or flour
+□ No soy sauce (use tamari instead)
+□ All grains are gluten-free (rice, corn, quinoa, etc.)
+□ All ingredients are from the ALLOWED list above
+
+This is a MEDICAL REQUIREMENT. Failure to follow these rules can cause serious health issues.
 """
-            elif "vegetarian" in preferences_lower or "veg" in preferences_lower:
-                if "non" not in preferences_lower:  # Make sure it's not "non-veg"
-                    dietary_instruction = """
-🥗 DIETARY PREFERENCE: VEGETARIAN
-- The user prefers VEGETARIAN dishes
-- DO NOT include meat, poultry, or seafood
-- Can include dairy products and eggs
-- Examples: paneer, vegetables, lentils, beans, eggs, cheese
-"""
-            elif "vegan" in preferences_lower:
+            elif "dairy free" in preferences_lower or "dairy-free" in preferences_lower or "dairyfree" in preferences_lower or "lactose free" in preferences_lower or "lactose-free" in preferences_lower:
                 dietary_instruction = """
-🌱 DIETARY PREFERENCE: VEGAN
-- The user prefers VEGAN dishes
-- DO NOT include ANY animal products (meat, dairy, eggs, honey)
-- Use only plant-based ingredients
-- Examples: vegetables, fruits, legumes, grains, nuts, plant-based proteins
+🥛🥛🥛 CRITICAL DIETARY REQUIREMENT: DAIRY FREE 🥛🥛🥛
+This is a STRICT requirement for people with lactose intolerance or dairy allergy.
+
+❌ ABSOLUTELY FORBIDDEN INGREDIENTS (NEVER USE THESE):
+- Milk (cow's milk, whole milk, skim milk, 2% milk, evaporated milk, condensed milk)
+- Cream (heavy cream, light cream, half-and-half, whipping cream)
+- Butter (regular butter, clarified butter)
+- Cheese (ALL types: cheddar, mozzarella, parmesan, cream cheese, cottage cheese, feta, etc.)
+- Yogurt (all dairy yogurt)
+- Sour cream
+- Ice cream (dairy-based)
+- Ghee (clarified butter - still contains dairy proteins)
+- Buttermilk
+- Whey, whey protein
+- Casein, caseinate
+- Paneer (Indian cottage cheese)
+- Khoya, mawa (reduced milk solids)
+- Malai (cream)
+- Any ingredient containing milk derivatives
+
+✅ ALLOWED INGREDIENTS (SAFE TO USE):
+Dairy Alternatives:
+- Almond milk (unsweetened or sweetened)
+- Coconut milk (canned or carton)
+- Soy milk
+- Oat milk
+- Rice milk
+- Cashew milk
+- Hemp milk
+- Coconut cream (instead of dairy cream)
+- Dairy-free butter (vegan butter, margarine without dairy)
+- Nutritional yeast (for cheesy flavor)
+- Coconut yogurt, almond yogurt, soy yogurt
+- Cashew cheese, almond cheese (dairy-free alternatives)
+
+Proteins (naturally dairy-free):
+- All meat, poultry, fish, seafood
+- Eggs (eggs are NOT dairy)
+- Tofu, tempeh
+- Beans, lentils, chickpeas
+- Nuts and seeds
+
+Grains & Starches:
+- Rice, pasta, bread (check for butter/milk)
+- Quinoa, oats, corn
+- Potatoes, sweet potatoes
+
+Vegetables & Fruits:
+- ALL fresh vegetables
+- ALL fresh fruits
+
+Oils & Fats:
+- Olive oil, vegetable oil, coconut oil, avocado oil
+- Dairy-free butter/margarine
+
+Condiments:
+- Soy sauce, tamari
+- Vinegars
+- Tomato sauce (check for cream)
+- Mustard, ketchup (most are dairy-free)
+
+🔍 RECIPE REQUIREMENTS:
+1. Replace milk with almond milk, coconut milk, or soy milk
+2. Replace butter with dairy-free butter or oil
+3. Replace cream with coconut cream or cashew cream
+4. Replace cheese with nutritional yeast or dairy-free cheese
+5. Replace yogurt with coconut yogurt or soy yogurt
+6. NEVER use any ingredient from the FORBIDDEN list
+7. Check that bread/baked goods don't contain milk or butter
+
+⚠️ VERIFICATION CHECKLIST - Before returning recipe:
+□ No milk, cream, or butter
+□ No cheese (including parmesan, paneer, cream cheese)
+□ No yogurt or sour cream
+□ No ghee or dairy-based ingredients
+□ All dairy is replaced with plant-based alternatives
+□ Eggs are OK (eggs are NOT dairy)
+
+This is a MEDICAL REQUIREMENT. Failure to follow can cause digestive issues or allergic reactions.
+"""
+            elif "low carb" in preferences_lower or "low-carb" in preferences_lower or "lowcarb" in preferences_lower:
+                dietary_instruction = """
+🥦 DIETARY PREFERENCE: LOW CARB
+- The user prefers LOW-CARB dishes
+- Minimize use of high-carb ingredients like rice, pasta, bread, potatoes, sugar
+- Focus on proteins, healthy fats, and low-carb vegetables
+- Examples: meat, fish, eggs, leafy greens, cauliflower, zucchini, broccoli, avocado
+- Keep total carbohydrates low per serving
+"""
+            elif "keto" in preferences_lower or "ketogenic" in preferences_lower:
+                dietary_instruction = """
+🥓🥓🥓 CRITICAL DIETARY REQUIREMENT: KETO/KETOGENIC 🥓🥓🥓
+This is a MEDICAL/WEIGHT-LOSS requirement. Very low carb (under 20-30g net carbs per day).
+
+❌ ABSOLUTELY FORBIDDEN INGREDIENTS (NEVER USE THESE):
+High-Carb Foods:
+- ALL grains (rice, wheat, oats, barley, quinoa, corn, pasta)
+- ALL bread (white, whole wheat, rye, gluten-free bread)
+- ALL flour (wheat flour, almond flour is OK)
+- ALL pasta and noodles (regular pasta, rice noodles - shirataki/konjac noodles OK)
+- Potatoes (white potatoes, sweet potatoes, yams)
+- Sugar (white sugar, brown sugar, cane sugar, coconut sugar)
+- Honey, maple syrup, agave nectar
+- ALL legumes (beans, lentils, chickpeas, peas - too high in carbs)
+- High-carb vegetables (corn, peas, carrots, beets, butternut squash)
+- Most fruits (bananas, apples, oranges, grapes, mangoes, pineapple)
+- Milk (too high in lactose/sugar - use heavy cream or unsweetened almond milk)
+- Yogurt (except Greek yogurt in small amounts)
+- Beer, sweet wines, sugary cocktails
+
+✅ ALLOWED INGREDIENTS (LOW CARB, HIGH FAT):
+Proteins (moderate amounts):
+- Meat (beef, pork, lamb - prefer fattier cuts)
+- Poultry (chicken thighs, duck, turkey - with skin)
+- Fish (salmon, mackerel, sardines, tuna - fatty fish preferred)
+- Seafood (shrimp, crab, lobster, mussels)
+- Eggs (whole eggs - yolks included)
+- Bacon, sausage (check for added sugars)
+
+Healthy Fats (HIGH amounts - this is KEY):
+- Butter, ghee
+- Heavy cream (not milk)
+- Cream cheese
+- Coconut oil, MCT oil
+- Olive oil, avocado oil
+- Avocados (whole avocados)
+- Nuts (macadamia, pecans, walnuts - in moderation)
+- Seeds (chia, flax, hemp, pumpkin)
+
+Low-Carb Vegetables (unlimited):
+- Leafy greens (spinach, kale, lettuce, arugula, chard)
+- Cruciferous vegetables (broccoli, cauliflower, Brussels sprouts, cabbage)
+- Zucchini, cucumber
+- Asparagus, green beans
+- Bell peppers (small amounts)
+- Mushrooms
+- Celery
+- Radishes
+- Cauliflower rice (instead of regular rice)
+- Zucchini noodles (instead of pasta)
+
+Cheese & Dairy (high fat):
+- Hard cheeses (cheddar, parmesan, Swiss, gouda)
+- Soft cheeses (brie, camembert, blue cheese)
+- Mozzarella, cream cheese
+- Sour cream
+- Heavy cream (NOT milk)
+- Greek yogurt (small amounts, full-fat only)
+
+Low-Carb Fruits (small amounts only):
+- Berries (strawberries, raspberries, blackberries - in moderation)
+- Coconut (unsweetened)
+- Avocado (technically a fruit)
+
+Condiments & Seasonings:
+- Salt, pepper, all herbs and spices
+- Mayonnaise (full-fat, no sugar)
+- Mustard
+- Hot sauce (check for sugar)
+- Soy sauce, tamari
+- Vinegars (apple cider, white, red wine)
+- Sugar-free sweeteners (stevia, erythritol, monk fruit)
+
+🔍 RECIPE REQUIREMENTS:
+1. HIGH FAT (70-80% of calories): Use butter, oil, cream, fatty meat, avocado
+2. MODERATE PROTEIN (20-25% of calories): Meat, fish, eggs
+3. VERY LOW CARB (5-10% of calories, under 20-30g net carbs per day)
+4. Replace rice with: cauliflower rice
+5. Replace pasta with: zucchini noodles (zoodles) or shirataki noodles
+6. Replace potatoes with: cauliflower mash or radishes
+7. Replace flour with: almond flour or coconut flour (in very small amounts)
+8. Replace sugar with: stevia, erythritol, or monk fruit sweetener
+9. Focus on: meat, eggs, cheese, butter, oil, low-carb vegetables, avocado
+10. AVOID: all grains, all sugar, all starchy vegetables, most fruits
+
+⚠️ VERIFICATION CHECKLIST - Before returning recipe:
+□ No grains (rice, bread, pasta, oats, corn)
+□ No potatoes or sweet potatoes
+□ No sugar, honey, or sweeteners with carbs
+□ No beans, lentils, or legumes
+□ No high-carb vegetables (peas, corn, carrots)
+□ No high-carb fruits (bananas, apples, etc.)
+□ Recipe is HIGH FAT, moderate protein, VERY LOW CARB
+□ Net carbs per serving is UNDER 10g (ideally under 5g)
+
+This is a METABOLIC REQUIREMENT for ketosis. High carbs will break ketosis.
+"""
+            elif "paleo" in preferences_lower or "paleolithic" in preferences_lower:
+                dietary_instruction = """
+🦴 DIETARY PREFERENCE: PALEO
+- The user requires PALEO dishes
+- DO NOT use grains, legumes, dairy, refined sugar, or processed foods
+- Focus on whole foods that could be hunted or gathered
+- Examples: meat, fish, eggs, vegetables, fruits, nuts, seeds, healthy oils
+- This is based on ancestral eating patterns
+"""
+            elif "halal" in preferences_lower:
+                dietary_instruction = """
+🕌 DIETARY PREFERENCE: HALAL
+- The user requires HALAL dishes
+- DO NOT use pork, alcohol, or non-halal meat
+- Use halal-certified meat and ingredients
+- Avoid any haram (forbidden) ingredients
+- This is a religious dietary requirement
+"""
+            elif "kosher" in preferences_lower:
+                dietary_instruction = """
+✡️ DIETARY PREFERENCE: KOSHER
+- The user requires KOSHER dishes
+- Follow kosher dietary laws
+- DO NOT mix meat and dairy
+- DO NOT use pork or shellfish
+- Use kosher-certified ingredients
+- This is a religious dietary requirement
+"""
+            elif "pescatarian" in preferences_lower or "pescetarian" in preferences_lower:
+                dietary_instruction = """
+🐟 DIETARY PREFERENCE: PESCATARIAN
+- The user prefers PESCATARIAN dishes
+- DO NOT use meat or poultry
+- CAN use fish, seafood, eggs, and dairy
+- Examples: fish, shrimp, crab, salmon, tuna, eggs, cheese, vegetables
+"""
+            elif "nut free" in preferences_lower or "nut-free" in preferences_lower or "no nuts" in preferences_lower:
+                dietary_instruction = """
+🥜 DIETARY PREFERENCE: NUT FREE
+- The user requires NUT-FREE dishes
+- DO NOT use any tree nuts: almonds, walnuts, cashews, pecans, pistachios, hazelnuts, macadamias
+- DO NOT use peanuts or peanut products
+- DO NOT use nut oils, nut butters, or nut flours
+- This is a strict dietary requirement - NO NUTS allowed
+"""
+            elif "sugar free" in preferences_lower or "sugar-free" in preferences_lower or "no sugar" in preferences_lower:
+                dietary_instruction = """
+🍬 DIETARY PREFERENCE: SUGAR FREE
+- The user requires SUGAR-FREE dishes
+- DO NOT use added sugar, honey, maple syrup, agave, or artificial sweeteners
+- Minimize naturally high-sugar ingredients
+- Use sugar-free alternatives when needed
+- Focus on naturally low-sugar whole foods
+"""
+            # PRIORITY 2: General dietary preferences (veg/non-veg)
+            # These are checked AFTER specific dietary restrictions
+            elif "non-veg" in preferences_lower or "non veg" in preferences_lower or "nonveg" in preferences_lower:
+                logger.info("✅ DETECTED: Non-Vegetarian dietary preference")
+                dietary_instruction = """
+🍖🍖🍖 DIETARY PREFERENCE: NON-VEGETARIAN 🍖🍖🍖
+The user prefers dishes that include meat, poultry, seafood, or eggs.
+
+✅ MUST INCLUDE (at least one of these):
+- Meat (beef, pork, lamb, goat, mutton)
+- Poultry (chicken, turkey, duck, quail)
+- Seafood (fish, shrimp, prawns, crab, lobster, mussels, clams)
+- Eggs (in main dish, not just as binding agent)
+
+❌ DO NOT GENERATE:
+- Purely vegetarian dishes (no paneer curry, vegetable biryani, dal, etc. unless combined with meat)
+- Purely vegan dishes
+- Dishes that are "vegetarian with optional meat" - meat should be CENTRAL to the dish
+
+✅ EXAMPLES OF GOOD NON-VEG DISHES:
+- Chicken curry, butter chicken, chicken tikka masala
+- Beef stew, beef biryani, steak
+- Fish curry, grilled salmon, fish tacos
+- Shrimp stir-fry, prawn curry
+- Lamb kebabs, mutton curry
+- Egg curry, omelette, frittata
+- Any dish where meat/seafood/eggs are the main protein
+
+🔍 REQUIREMENTS:
+1. The recipe MUST contain meat, poultry, seafood, OR eggs as a PRIMARY ingredient
+2. Meat/seafood should be a MAIN component, not just a garnish
+3. Prioritize meat-based proteins over plant-based proteins
+4. If the user has inventory items, use meat/fish/eggs from inventory first
+
+This is a PREFERENCE for animal-based proteins. Focus on meat-centric dishes.
+"""
+            elif "vegetarian" in preferences_lower or ("veg" in preferences_lower and "non" not in preferences_lower):
+                logger.info("✅ DETECTED: Vegetarian dietary preference")
+                dietary_instruction = """
+🥗🥗🥗 DIETARY PREFERENCE: VEGETARIAN 🥗🥗🥗
+The user prefers vegetarian dishes (no meat/fish, but dairy and eggs are OK).
+
+❌ ABSOLUTELY FORBIDDEN INGREDIENTS:
+- ALL meat (beef, pork, lamb, chicken, turkey, duck, goat, mutton)
+- ALL seafood (fish, shrimp, prawns, crab, lobster, mussels, clams, squid)
+- Fish sauce, oyster sauce, shrimp paste, anchovy paste
+- Gelatin (made from animal bones)
+- Animal-based stocks (chicken stock, beef broth, fish stock)
+
+✅ ALLOWED INGREDIENTS:
+Proteins:
+- Eggs (whole eggs, egg whites, egg yolks)
+- Dairy (milk, cheese, paneer, yogurt, butter, ghee, cream)
+- Tofu, tempeh (soy products)
+- Beans, lentils, chickpeas (all legumes)
+- Nuts and seeds
+- Nut butters
+
+Grains & Starches:
+- Rice, quinoa, oats, pasta, bread
+- Potatoes, sweet potatoes
+
+Vegetables & Fruits:
+- ALL vegetables
+- ALL fruits
+
+Dairy Products:
+- Milk, cheese, paneer, yogurt, butter, ghee, cream, sour cream
+- Cottage cheese, ricotta, mozzarella, cheddar, feta, etc.
+
+Others:
+- Honey (vegetarians typically eat honey, unlike vegans)
+- Vegetable stock/broth
+
+🔍 RECIPE REQUIREMENTS:
+1. NO meat, poultry, or seafood
+2. CAN use eggs and dairy products
+3. Focus on: vegetables, legumes, dairy, eggs, grains, nuts
+4. Good protein sources: paneer, tofu, beans, lentils, chickpeas, eggs
+5. Use vegetable stock instead of chicken/beef stock
+
+✅ EXAMPLES OF VEGETARIAN DISHES:
+- Paneer butter masala, palak paneer
+- Vegetable biryani, jeera rice
+- Dal (lentils), chickpea curry
+- Egg curry, omelette, frittata
+- Pasta with cheese, vegetable lasagna
+- Grilled cheese sandwich, veggie burgers
+- Salads with cheese, vegetable stir-fry with tofu
+
+⚠️ VERIFICATION CHECKLIST:
+□ No meat or poultry
+□ No fish or seafood
+□ No fish sauce, oyster sauce, or animal-based condiments
+□ Can include eggs and dairy
+□ Use vegetable stock, not meat stock
+
+This is a DIETARY PREFERENCE. Vegetarians avoid meat and fish but can eat dairy and eggs.
 """
             
             if dietary_instruction:
+                logger.info(f"📋 Adding dietary instruction to prompt (length: {len(dietary_instruction)} chars)")
                 prompt_parts.append(dietary_instruction)
+            else:
+                logger.warning(f"⚠️ No dietary instruction matched for preferences: '{preferences}'")
         
         # Inventory
         prompt_parts.append(f"Available ingredients:\n{inventory_text}")

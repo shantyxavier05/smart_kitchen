@@ -139,12 +139,35 @@ If the user specifies allergies in their prompt:
 - Instead, generate a COMPLETELY DIFFERENT dish that naturally doesn't contain the allergen
 - This rule OVERRIDES all other preferences including cuisine type
 
+🥗🥗🥗 CRITICAL DIETARY RESTRICTIONS - SECOND HIGHEST PRIORITY 🥗🥗🥗
+If the user specifies dietary preferences (gluten-free, dairy-free, vegan, keto, etc.):
+- READ THE DIETARY PREFERENCE SECTION IN THE PROMPT CAREFULLY!
+- STRICTLY FOLLOW all restrictions listed in the dietary preference instructions
+- DO NOT use ANY forbidden ingredients listed for that dietary preference
+- ONLY use ingredients from the ALLOWED list for that dietary preference
+- When in doubt, choose naturally compliant whole foods
+- Dietary restrictions are often MEDICAL requirements (celiac disease, lactose intolerance, diabetes, etc.)
+- Violating dietary restrictions can cause serious health issues
+
+IMPORTANT: The user prompt will contain detailed lists of:
+- ❌ FORBIDDEN ingredients (NEVER use these)
+- ✅ ALLOWED ingredients (ONLY use these)
+- Follow these lists EXACTLY. Do not improvise or use ingredients not on the allowed list.
+
 Follow the user's requirements in their prompt. Pay special attention to:
-- Allergies (ABSOLUTE HIGHEST PRIORITY - never generate dishes with allergen names)
-- Cuisine preferences (if specified and no allergy conflicts)
-- Specific dish requests (only if no allergy conflicts)
-- Available ingredients
-- Dietary restrictions
+1. Allergies (ABSOLUTE HIGHEST PRIORITY - never generate dishes with allergen names or allergens in ingredients)
+2. Dietary restrictions (SECOND HIGHEST PRIORITY - strictly follow all forbidden/allowed ingredient lists)
+3. Cuisine preferences (if specified and no conflicts with #1 or #2)
+4. Specific dish requests (only if no conflicts with #1 or #2)
+5. Available ingredients
+6. Serving size
+
+CRITICAL RULE: If there is a dietary restriction in the user prompt (gluten-free, dairy-free, vegan, keto, etc.):
+- You MUST read the entire dietary restriction section
+- You MUST follow the FORBIDDEN and ALLOWED ingredient lists exactly
+- You MUST NOT use any ingredient from the FORBIDDEN list
+- You MUST ONLY use ingredients from the ALLOWED list
+- If you're unsure about an ingredient, DON'T USE IT
 
 Respond with valid JSON: {{"name": "Recipe Name", "description": "Recipe description", "servings": 4, "ingredients": [{{"name": "ingredient", "quantity": 1, "unit": "unit"}}], "instructions": ["step 1", "step 2"]}}"""
 
